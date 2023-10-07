@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net7.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Copyright>.NET 7.0 version copyright © 2023 Oregon State University &lt;https://oregonstate.edu/&gt;. Copyright of C# port © 2014-2017 by Shinta &lt;shintadono@googlemail.com&gt;. Copyright © 2005-2014, martin isenburg &lt;martin.isenburg@rapidlasso.com&gt;, rapidlasso - tools to catch reality &lt;https://rapidlasso.de&gt;</Copyright>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>LasZip.$(MSBuildProjectName.Replace(" ", "_"))</RootNamespace>
+    <Version>2.2.14.0907</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management.Automation" Version="7.3.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\laszip.net\LasZip.Net.csproj" />
+  </ItemGroup>
+
+</Project>

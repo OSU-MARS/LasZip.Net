@@ -1,50 +1,21 @@
-laszip.net
-==========
+### Overview
+LasZip.Net is a reimplementation of [LASzip](https://rapidlasso.de/laszip/) entirely in C#. This repo's primary purpose is keeping LASzip's 
+C# implementation in sync with its C++ version. Towards that end, a copy of [the C++ version](https://github.com/LAStools/LAStools/tree/master/LASzip/src) 
+is included in this repo as a tracking mechanism. As LASzip changes its updated files can be dropped into the C++ reference directory and the
+diffs in the C++ then indicate where corresponding updates need to be made in C#. C# .cs files are therefore tagged with the names of the
+corresponding C++ files.
 
-The LASzip LiDAR compressor packaged as a simple stand-alone assembly for
-easy inclusion of compression and decompression functionality into
-other software. It compresses LAS files into much more compact LAZ
-files and vice versa. The resulting files are around 7 - 20 percent
-of their original size.
+### Differences from LASzip
+LasZip.Net is intended to be interoperable with any other compliant .las or .laz reader or writer. While both code bases also use similar
+code layouts, some differences do exist between the C# and C++ code structure. Primarily, LasZip.Net is more rigorous in following the 
+convention of one type per file and uses .NET streams rather than ports of LASzip's ByteStreamIn and ByteStreamOut class families.
 
-To get the original LASzip just download the LAStools distribution which contains
-the LASlib as well as the LASzip sources together with the binaries
-of the popular LAStools software and some small example LAZ files.
+### Evolution from earlier versions
+This repo is forked from [@shintadono's initial implementation of laszip.net](https://github.com/shintadono/laszip.net), which was last
+updated in December 2017 and ported most of the code in LASzip 2.2.0.140907 which, per the build number, is from September 7, 2014. 
+[LAS 1.4 R13](https://www.asprs.org/divisions-committees/lidar-division/laser-las-file-format-exchange-activities) was released at that time
+but LASzip's layered, chunked compression was not. As of October 2023, LAS 1.4 R14, March 2019, is the current version of the LAS specification.
 
-* http://laszip.org
-* http://lastools.org
-* http://rapidlasso.com/LAStools
+The main changes in this repo are
 
-To get the newest version of the C# port of the LASzip library, goto:
-https://github.com/shintadono/laszip.net
-
-ATTENTION: This port is not a complete port of the LASzip library. It does not
-contain the example provided in it (but has some examples off it's own), and
-you can't create version 1 LAZ files, while reading version 1 is still possible.
-
-
-**LICENSE AGREEMENT (for LASzip.Net LiDAR compression)**
-
-  LASzip.Net is open-source and is licensed with the standard LGPL version 2.1
-  (see LICENSE file).
-
-  This software is distributed WITHOUT ANY WARRANTY and without even the
-  implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
-
-**PROGRAMMERS**
-
-  martin@rapidlasso.com (https://github.com/rapidlasso)
-
-  shintadono@googlemail.com (https://github.com/shintadono)
-
-  twdotson (https://github.com/twdotson)
-
-  Jean-Noël Pioche
-
-**COPYRIGHT**
-
-  (c) 2007-2014, martin isenburg, rapidlasso - fast tools to catch reality
-
-  (c) of C# port 2014-2017 by Shinta <shintadono@googlemail.com>
-
+- Realignment towards standard C# coding practices. Naming, exceptions, properties, accessibility, nullability, initialization, file layout.
