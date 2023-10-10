@@ -58,7 +58,10 @@ namespace LasZip
             LasItem[]? items = lasZip.Items;
 
             // create entropy decoder (if requested)
-            dec = null;
+            if (this.dec != null)
+            {
+                dec = null;
+            }
             if (lasZip != null && lasZip.Compressor != 0)
             {
                 switch (lasZip.Coder)
@@ -264,12 +267,12 @@ namespace LasZip
                             {
                                 // previous chunk was corrupt
                                 currentChunk--;
-                                throw new Exception("4711");
+                                throw new IOException("4711");
                             }
                         }
                     }
                     InitDec();
-                    if (tabledChunks == currentChunk) // no or incomplete chunk table?
+                    if (currentChunk == tabledChunks) // no or incomplete chunk table?
                     {
                         //if(current_chunk==number_chunks)
                         //{
@@ -330,15 +333,32 @@ namespace LasZip
             return true;
         }
 
-        public bool Done()
+        public bool CheckEnd()
         {
             if (readers == readersCompressed)
             {
-                if (dec != null) dec.Done();
+                if (this.dec != null)
+                {
+                    this.dec.Done();
+                    this.currentChunk++;
+                    // check integrity
+                    if (this.currentChunk < this.tabledChunks)
+                    {
+                        long here = this.inStream.Position;
+                        if (this.chunkStarts[(int)this.currentChunk] != here)
+                        {
+                            // last chunk was corrupt
+                            throw new IOException("chunk with index " + currentChunk + " of " + tabledChunks + " is corrupt");
+                        }
+                    }
+                }
             }
+            return true;
+        }
 
+        public bool Done()
+        {
             inStream = null;
-
             return true;
         }
 
@@ -420,7 +440,7 @@ namespace LasZip
 
             inStream.Read(buffer, 0, 8);
             UInt32 version = BitConverter.ToUInt32(buffer, 0);
-            if (version != 0) throw new Exception();
+            if (version != 0) { throw new IOException(); }
 
             numberChunks = BitConverter.ToUInt32(buffer, 4);
             chunkTotals = null;

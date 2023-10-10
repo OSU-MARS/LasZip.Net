@@ -156,7 +156,10 @@ namespace LasZip
 
             if (length < EncodeDecode.MinLength) RenormDecInterval(); // renormalization
 
-            Debug.Assert(sym < 2);
+            if (sym >= 2)
+            {
+                throw new IOException("4711");
+            }
 
             return sym;
         }
@@ -179,9 +182,10 @@ namespace LasZip
 
             if (length < EncodeDecode.MinLength) RenormDecInterval(); // renormalization
 
-            Debug.Assert(sym < (1u << (int)bits));
-
-            if (sym >= (1u << (int)bits)) throw new Exception("4711");
+            if (sym >= (1U << (int)bits))
+            {
+                throw new FileLoadException("4711");
+            }
 
             return sym;
         }
@@ -194,9 +198,10 @@ namespace LasZip
 
             if (length < EncodeDecode.MinLength) RenormDecInterval(); // renormalization
 
-            Debug.Assert(sym < (1u << 8));
-
-            if (sym >= (1u << 8)) throw new Exception("4711");
+            if (sym >= (1U << 8))
+            {
+                throw new IOException("4711");
+            }
 
             return (byte)sym;
         }
@@ -209,9 +214,10 @@ namespace LasZip
 
             if (length < EncodeDecode.MinLength) RenormDecInterval(); // renormalization
 
-            Debug.Assert(sym < (1u << 16));
-
-            if (sym >= (1u << 16)) throw new Exception("4711");
+            if (sym >= (1U << 16))
+            {
+                throw new IOException("4711");
+            }
 
             return (UInt16)sym;
         }

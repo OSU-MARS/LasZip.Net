@@ -80,8 +80,8 @@ namespace LasZip
             last.Y = item.Y;
             last.Z = item.Z;
             last.Intensity = 0; // but set intensity to zero
-            last.Flags = item.Flags;
-            last.Classification = item.Classification;
+            last.ReturnNumbersAndFlags = item.ReturnNumbersAndFlags;
+            last.Classification = item.ClassificationAndFlags;
             last.ScanAngleRank = item.ScanAngleRank;
             last.UserData = item.UserData;
             last.PointSourceID = item.PointSourceID;
@@ -101,16 +101,16 @@ namespace LasZip
                 // decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
                 if ((changed_values & 32) != 0)
                 {
-                    if (bitByte[last.Flags] == null)
+                    if (bitByte[last.ReturnNumbersAndFlags] == null)
                     {
-                        bitByte[last.Flags] = ArithmeticDecoder.CreateSymbolModel(256);
-                        ArithmeticDecoder.InitSymbolModel(bitByte[last.Flags]);
+                        bitByte[last.ReturnNumbersAndFlags] = ArithmeticDecoder.CreateSymbolModel(256);
+                        ArithmeticDecoder.InitSymbolModel(bitByte[last.ReturnNumbersAndFlags]);
                     }
-                    last.Flags = (byte)dec.DecodeSymbol(bitByte[last.Flags]);
+                    last.ReturnNumbersAndFlags = (byte)dec.DecodeSymbol(bitByte[last.ReturnNumbersAndFlags]);
                 }
 
-                r = (byte)(last.Flags & 0x7); // return_number
-                n = (byte)((last.Flags >> 3) & 0x7); // number_of_returns_of_given_pulse
+                r = (byte)(last.ReturnNumbersAndFlags & 0x7); // return_number
+                n = (byte)((last.ReturnNumbersAndFlags >> 3) & 0x7); // number_of_returns_of_given_pulse
                 m = LasZipCommonV2.NumberReturnMap[n, r];
                 l = LasZipCommonV2.NumberReturnLevel[n, r];
 
@@ -139,7 +139,7 @@ namespace LasZip
                 // decompress the scan_angle_rank ... if it has changed
                 if ((changed_values & 4) != 0)
                 {
-                    int val = (int)dec.DecodeSymbol(scanAngleRank[(last.Flags & 0x40) != 0 ? 1 : 0]); // scan_direction_flag
+                    int val = (int)dec.DecodeSymbol(scanAngleRank[(last.ReturnNumbersAndFlags & 0x40) != 0 ? 1 : 0]); // scan_direction_flag
                                                                                                           //last->scan_angle_rank=(sbyte)MyDefs.U8_FOLD(val+(byte)last->scan_angle_rank);
                     last.ScanAngleRank = (sbyte)((val + (byte)last.ScanAngleRank) % 256);
                 }
@@ -163,8 +163,8 @@ namespace LasZip
             }
             else
             {
-                r = (byte)(last.Flags & 0x7); // return_number
-                n = (byte)((last.Flags >> 3) & 0x7); // number_of_returns_of_given_pulse
+                r = (byte)(last.ReturnNumbersAndFlags & 0x7); // return_number
+                n = (byte)((last.ReturnNumbersAndFlags >> 3) & 0x7); // number_of_returns_of_given_pulse
                 m = LasZipCommonV2.NumberReturnMap[n, r];
                 l = LasZipCommonV2.NumberReturnLevel[n, r];
             }
@@ -192,8 +192,8 @@ namespace LasZip
             item.Y = last.Y;
             item.Z = last.Z;
             item.Intensity = last.Intensity;
-            item.Flags = last.Flags;
-            item.Classification = last.Classification;
+            item.ReturnNumbersAndFlags = last.ReturnNumbersAndFlags;
+            item.ClassificationAndFlags = last.Classification;
             item.ScanAngleRank = last.ScanAngleRank;
             item.UserData = last.UserData;
             item.PointSourceID = last.PointSourceID;

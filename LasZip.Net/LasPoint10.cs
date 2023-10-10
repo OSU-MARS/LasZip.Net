@@ -17,7 +17,7 @@ namespace LasZip
         //public byte number_of_returns_of_given_pulse : 3 { get; set; }
         //public byte scan_direction_flag : 1 { get; set; }
         //public byte edge_of_flight_line : 1 { get; set; }
-        public byte Flags { get; set; }
+        public byte ReturnNumbersAndFlags { get; set; }
 
         public byte Classification { get; set; }
         public sbyte ScanAngleRank { get; set; }

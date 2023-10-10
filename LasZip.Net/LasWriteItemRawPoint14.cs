@@ -28,13 +28,13 @@ namespace LasZip
                 p14->Intensity = item.Intensity;
                 p14->ScanDirectionFlag = item.ScanDirectionFlag;
                 p14->EdgeOfFlightLine = item.EdgeOfFlightLine;
-                p14->Classification = (byte)(item.Classification & 31);
+                p14->Classification = (byte)(item.ClassificationAndFlags & 31);
                 p14->UserData = item.UserData;
                 p14->PointSourceID = item.PointSourceID;
 
                 if (item.ExtendedPointType != 0)
                 {
-                    p14->ClassificationFlags = (byte)(item.ExtendedClassificationFlags | (item.Classification >> 5));
+                    p14->ClassificationFlags = (byte)((item.ExtendedClassificationFlags & 8) | (item.ClassificationAndFlags >> 5));
                     if (item.ExtendedClassification > 31) p14->Classification = item.ExtendedClassification;
                     p14->ScannerChannel = item.ExtendedScannerChannel;
                     p14->ReturnNumber = item.ExtendedReturnNumber;
@@ -43,7 +43,7 @@ namespace LasZip
                 }
                 else
                 {
-                    p14->ClassificationFlags = (byte)(item.Classification >> 5);
+                    p14->ClassificationFlags = (byte)(item.ClassificationAndFlags >> 5);
                     p14->ScannerChannel = 0;
                     p14->ReturnNumber = item.ReturnNumber;
                     p14->NumberOfReturnsOfGivenPulse = item.NumberOfReturnsOfGivenPulse;

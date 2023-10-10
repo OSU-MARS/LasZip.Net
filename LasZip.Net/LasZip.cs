@@ -140,18 +140,47 @@ namespace LasZip
             return true;
         }
 
+        public bool RequestCompatibilityMode(UInt16 requestedCompatibilityMode)
+        {
+            if (this.NumItems != 0)
+            {
+                throw new InvalidOperationException("request compatibility mode before calling setup()");
+            }
+
+            if (requestedCompatibilityMode > 1)
+            {
+                throw new InvalidOperationException("compatibility mode larger than 1 not supported");
+            }
+            if (requestedCompatibilityMode != 0)
+            {
+                this.Options |= 0x00000001;
+            }
+            else
+            {
+                this.Options &= 0xFFFFFFFE;
+            }
+            return true;
+        }
+
         // go back and forth between item array and point type & size
         public bool Setup(out UInt16 numItems, out LasItem[]? items, byte pointType, UInt16 pointSize, UInt16 compressor = CompressorNone)
         {
             numItems = 0;
             items = null;
 
+            bool compatible = false;
             bool have_point14 = false;
             bool have_gps_time = false;
             bool have_rgb = false;
             bool have_nir = false;
             bool have_wavepacket = false;
-            int extra_bytes_number = 0;
+            int extra_bytes_number;
+
+            // turns on LAS 1.4 compatibility mode 
+            if ((this.Options & 1) != 0)
+            {
+                compatible = true;
+            }
 
             // switch over the point types we know
             switch (pointType)
@@ -221,32 +250,56 @@ namespace LasZip
                 extra_bytes_number = 0;
             }
 
+            // maybe represent new LAS 1.4 as corresponding LAS 1.3 points plus extra bytes for compatibility
+            if (have_point14 && compatible)
+            {
+                // we need 4 extra bytes for the new point attributes
+                extra_bytes_number += 5;
+                // we store the GPS time separately
+                have_gps_time = true;
+                // we do not use the point14 item
+                have_point14 = false;
+                // if we have NIR ...
+                if (have_nir)
+                {
+                    // we need another 2 extra bytes 
+                    extra_bytes_number += 2;
+                    // we do not use the NIR item
+                    have_nir = false;
+                }
+            }
+            
             // create item description
-
             numItems = (UInt16)(1 + (have_gps_time ? 1 : 0) + (have_rgb ? 1 : 0) + (have_wavepacket ? 1 : 0) + (extra_bytes_number != 0 ? 1 : 0));
             items = new LasItem[numItems];
 
             UInt16 i = 1;
             if (have_point14)
             {
-                items[0] = new LasItem();
-                items[0].Type = LasItemType.Point14;
-                items[0].Size = 30;
-                items[0].Version = 0;
+                items[0] = new LasItem
+                {
+                    Type = LasItemType.Point14,
+                    Size = 30,
+                    Version = 0
+                };
             }
             else
             {
-                items[0] = new LasItem();
-                items[0].Type = LasItemType.Point10;
-                items[0].Size = 20;
-                items[0].Version = 0;
+                items[0] = new LasItem
+                {
+                    Type = LasItemType.Point10,
+                    Size = 20,
+                    Version = 0
+                };
             }
             if (have_gps_time)
             {
-                items[i] = new LasItem();
-                items[i].Type = LasItemType.Gpstime11;
-                items[i].Size = 8;
-                items[i].Version = 0;
+                items[i] = new LasItem
+                {
+                    Type = LasItemType.Gpstime11,
+                    Size = 8,
+                    Version = 0
+                };
                 i++;
             }
             if (have_rgb)
@@ -268,18 +321,22 @@ namespace LasZip
             }
             if (have_wavepacket)
             {
-                items[i] = new LasItem();
-                items[i].Type = LasItemType.Wavepacket13;
-                items[i].Size = 29;
-                items[i].Version = 0;
+                items[i] = new LasItem
+                {
+                    Type = LasItemType.Wavepacket13,
+                    Size = 29,
+                    Version = 0
+                };
                 i++;
             }
             if (extra_bytes_number != 0)
             {
-                items[i] = new LasItem();
-                items[i].Type = LasItemType.Byte;
-                items[i].Size = (UInt16)extra_bytes_number;
-                items[i].Version = 0;
+                items[i] = new LasItem
+                {
+                    Type = LasItemType.Byte,
+                    Size = (UInt16)extra_bytes_number,
+                    Version = 0
+                };
                 i++;
             }
             if (compressor != 0) RequestVersion(2);

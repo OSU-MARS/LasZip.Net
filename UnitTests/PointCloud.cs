@@ -131,6 +131,20 @@ namespace LasZip.UnitTests
             return true;
         }
 
+        public static bool HeaderCorePointGpstimeIntensityXyzEqual(PointCloud pointCloud, PointCloud other)
+        {
+            if (PointCloud.HeaderCorePointIntensityXyzEqual(pointCloud, other) == false)
+            {
+                return false;
+            }
+            if (ArrayExtensions.Equals(pointCloud.Gpstime, other.Gpstime) == false)
+            {
+                return false;
+            }
+
+            return true;
+        }
+        
         public static bool HeaderCorePointIntensityXyzEqual(PointCloud pointCloud, PointCloud other)
         {
             if (PointCloud.HeaderCoreAndPointXyzEqual(pointCloud, other) == false)

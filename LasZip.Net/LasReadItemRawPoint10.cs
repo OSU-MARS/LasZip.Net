@@ -25,8 +25,8 @@ namespace LasZip
                 item.Y = p10->Y;
                 item.Z = p10->Z;
                 item.Intensity = p10->Intensity;
-                item.Flags = p10->Flags;
-                item.Classification = p10->Classification;
+                item.ReturnNumbersAndFlags = p10->ReturnNumbersAndFlags;
+                item.ClassificationAndFlags = p10->Classification;
                 item.ScanAngleRank = p10->ScanAngleRank;
                 item.UserData = p10->UserData;
                 item.PointSourceID = p10->PointSourceID;

@@ -18,8 +18,8 @@ namespace LasZip
 
         public ArithmeticEncoder()
         {
-            outBuffer = new byte[2 * EncodeDecode.BUFFER_SIZE];
-            endBuffer = 2 * EncodeDecode.BUFFER_SIZE;
+            outBuffer = new byte[2 * EncodeDecode.BufferSize];
+            endBuffer = 2 * EncodeDecode.BufferSize;
         }
 
         // Manage encoding
@@ -64,8 +64,8 @@ namespace LasZip
 
             if (endByte != endBuffer)
             {
-                Debug.Assert(outByte < EncodeDecode.BUFFER_SIZE);
-                outStream.Write(outBuffer, EncodeDecode.BUFFER_SIZE, EncodeDecode.BUFFER_SIZE);
+                Debug.Assert(outByte < EncodeDecode.BufferSize);
+                outStream.Write(outBuffer, EncodeDecode.BufferSize, EncodeDecode.BufferSize);
             }
 
             if (outByte != 0) outStream.Write(outBuffer, 0, outByte);
@@ -270,8 +270,8 @@ namespace LasZip
             Debug.Assert(this.outStream != null);
 
             if (outByte == endBuffer) { outByte = 0; }
-            outStream.Write(outBuffer, outByte, EncodeDecode.BUFFER_SIZE);
-            endByte = outByte + EncodeDecode.BUFFER_SIZE;
+            outStream.Write(outBuffer, outByte, EncodeDecode.BufferSize);
+            endByte = outByte + EncodeDecode.BufferSize;
             Debug.Assert(endByte > outByte);
             Debug.Assert(outByte < endBuffer);
         }

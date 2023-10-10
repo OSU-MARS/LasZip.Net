@@ -1,31 +1,5 @@
-﻿//===============================================================================
-//
-//  FILE:  laszip_dll.cs
-//
-//  CONTENTS:
-//
-//    C# port of a simple DLL interface to LASzip.
-//
-//  PROGRAMMERS:
-//
-//    martin.isenburg@rapidlasso.com  -  http://rapidlasso.com
-//
-//  COPYRIGHT:
-//
-//    (c) 2005-2012, martin isenburg, rapidlasso - tools to catch reality
-//    (c) of the C# port 2014-2017 by Shinta <shintadono@googlemail.com>
-//
-//    This is free software; you can redistribute and/or modify it under the
-//    terms of the GNU Lesser General Licence as published by the Free Software
-//    Foundation. See the COPYING file for more information.
-//
-//    This software is distributed WITHOUT ANY WARRANTY and without even the
-//    implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-//
-//  CHANGE HISTORY: omitted for easier Copy&Paste (pls see the original)
-//
-//===============================================================================
-
+﻿// laszip_dll.cpp
+using LasZip.Extensions;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -53,6 +27,19 @@ namespace LasZip
 
         public LasHeader Header;
         public LasPoint Point;
+
+        private LasIndex? laxIndex;
+        private double laxRminX;
+        private double laxRminY;
+        private double laxRmaxX;
+        private double laxRmaxY;
+        private string? laxFileName;
+        private LasZipDllInventory? inventory;
+
+        public bool LaxAppend { get; init; }
+        public bool LaxCreate { get; init; }
+        public bool LaxExploit { get; init; } // TODO: rename to UseLaxIndex
+        public bool PreserveGeneratingSoftware { get; init; }
 
         public LasZipDll()
         {
@@ -130,7 +117,7 @@ namespace LasZip
             Point.NumberOfReturnsOfGivenPulse = 0;// : 3;
             Point.ScanDirectionFlag = 0;// : 1;
             Point.EdgeOfFlightLine = 0;// : 1;
-            Point.Classification = 0;
+            Point.ClassificationAndFlags = 0;
             Point.ScanAngleRank = 0;
             Point.UserData = 0;
             Point.PointSourceID = 0;
@@ -418,7 +405,7 @@ namespace LasZip
                 throw new InvalidOperationException("cannot set point for reader");
             }
 
-            this.Point.Classification = point.Classification;
+            this.Point.ClassificationAndFlags = point.ClassificationAndFlags;
             this.Point.EdgeOfFlightLine = point.EdgeOfFlightLine;
             this.Point.ExtendedClassification = point.ExtendedClassification;
             this.Point.ExtendedClassificationFlags = point.ExtendedClassificationFlags;
@@ -473,11 +460,6 @@ namespace LasZip
 
         public int SetCoordinates(double[] coordinates)
         {
-            if (coordinates == null)
-            {
-                throw new InvalidOperationException("laszip_F64 coordinates pointer is zero");
-            }
-
             if (reader != null)
             {
                 throw new InvalidOperationException("cannot set coordinates for reader");
@@ -512,17 +494,14 @@ namespace LasZip
             {
                 throw new InvalidOperationException("number of key_entries is zero");
             }
-
             if (key_entries == null)
             {
                 throw new InvalidOperationException("key_entries pointer is zero");
             }
-
             if (reader != null)
             {
                 throw new InvalidOperationException("cannot set geokeys after reader was opened");
             }
-
             if (writer != null)
             {
                 throw new InvalidOperationException("cannot set geokeys after writer was opened");
@@ -531,7 +510,6 @@ namespace LasZip
             // create the geokey directory
             // TODO: move serialization to LasGeokey
             byte[] buffer = new byte[sizeof(LasGeoKeyEntry) * (number + 1)];
-
             fixed (byte* pBuffer = buffer)
             {
                 LasGeoKeyEntry* key_entries_plus_one = (LasGeoKeyEntry*)pBuffer;
@@ -695,21 +673,35 @@ namespace LasZip
             if (Header.Vlrs.Count > 0)
             {
                 // overwrite existing VLR ?
-                for (int i = (int)Header.NumberOfVariableLengthRecords - 1; i >= 0; i--)
+                int i;
+                for (i = (int)Header.NumberOfVariableLengthRecords - 1; i >= 0; i--)
                 {
-                    if (Header.Vlrs[i].RecordID == vlr.RecordID && !ArrayCompare(Header.Vlrs[i].UserID, vlr.UserID))
+                    if ((Header.Vlrs[i].RecordID == vlr.RecordID) && (LasZipDll.ArrayCompare(Header.Vlrs[i].UserID, vlr.UserID) == false))
                     {
                         if (Header.Vlrs[i].RecordLengthAfterHeader != 0)
+                        {
                             Header.OffsetToPointData -= Header.Vlrs[i].RecordLengthAfterHeader;
+                        }
 
                         Header.Vlrs.RemoveAt(i);
+                        break;
                     }
                 }
-            }
 
-            Header.Vlrs.Add(vlr);
-            Header.NumberOfVariableLengthRecords = (UInt32)Header.Vlrs.Count;
-            Header.OffsetToPointData += 54;
+                // create new VLR
+                if (i == this.Header.NumberOfVariableLengthRecords)
+                {
+                    this.Header.NumberOfVariableLengthRecords++;
+                    this.Header.OffsetToPointData += 54;
+                    this.Header.Vlrs.Add(vlr);
+                }
+            }
+            else
+            {
+                Header.Vlrs.Add(vlr);
+                Header.NumberOfVariableLengthRecords = (UInt32)Header.Vlrs.Count;
+                Header.OffsetToPointData += 54;
+            }
 
             // copy the VLR
             Header.OffsetToPointData += vlr.RecordLengthAfterHeader;
@@ -793,7 +785,7 @@ namespace LasZip
             #endregion
         }
 
-        public int OpenWriter(Stream streamOut, bool compress, bool leaveOpen = false)
+        public void OpenWriter(Stream streamOut, bool compress, bool leaveOpen = false)
         {
             if (!streamOut.CanWrite)
             {
@@ -813,10 +805,10 @@ namespace LasZip
             this.streamOut = streamOut;
             leaveStreamOutOpen = leaveOpen;
 
-            return this.OpenWriterStream(compress, lasZip, vlrPayloadSize);
+            this.OpenWriterStream(compress, lasZip, vlrPayloadSize);
         }
 
-        public int OpenWriter(string filePath, bool compress)
+        public void OpenWriter(string filePath, bool compress)
         {
             if (String.IsNullOrWhiteSpace(filePath))
             {
@@ -836,10 +828,13 @@ namespace LasZip
             streamOut = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read);
             leaveStreamOutOpen = false;
 
-            return this.OpenWriterStream(compress, lasZip, laszipVlrPayloadSize);
+            this.OpenWriterStream(compress, lasZip, laszipVlrPayloadSize);
+
+            // copy the .las/.laz file name for later .lax file creation
+            this.laxFileName = Path.GetFileName(filePath);
         }
 
-        private int OpenWriterStream(bool compress, LasZip laszip, UInt32 laszipVlrPayloadSize)
+        private void OpenWriterStream(bool compress, LasZip laszip, UInt32 laszipVlrPayloadSize)
         {
             #region write the header variable after variable
             streamOut.WriteByte((byte)'L');
@@ -857,10 +852,10 @@ namespace LasZip
             streamOut.WriteByte(Header.VersionMinor);
             streamOut.Write(Header.SystemIdentifier, 0, 32);
 
-            if (Header.GeneratingSoftware == null || Header.GeneratingSoftware.Length != 32)
+            if ((this.PreserveGeneratingSoftware == false) || (this.Header.GeneratingSoftware == null))
             {
                 byte[] generatingSoftware = Encoding.ASCII.GetBytes(LasZip.GetAssemblyVersionString());
-                Array.Copy(generatingSoftware, Header.GeneratingSoftware, Math.Min(generatingSoftware.Length, 32));
+                Array.Copy(generatingSoftware, this.Header.GeneratingSoftware, Math.Min(generatingSoftware.Length, 32));
             }
 
             streamOut.Write(Header.GeneratingSoftware, 0, 32);
@@ -912,7 +907,7 @@ namespace LasZip
             {
                 if (Header.HeaderSize < 235)
                 {
-                    throw new InvalidOperationException(String.Format("for LAS 1.{0} header_size should at least be 235 but it is only {1}", Header.VersionMinor, Header.HeaderSize));
+                    throw new InvalidOperationException(String.Format("For LAS "+ this.Header.VersionMajor + "." + this.Header.VersionMinor + " HeaderSize should at least be 235 bytes but it is only " + this.Header.HeaderSize + " bytes."));
                 }
 
                 streamOut.Write(BitConverter.GetBytes(Header.StartOfWaveformDataPacketRecord), 0, 8);
@@ -971,7 +966,7 @@ namespace LasZip
             if (compress)
             {
                 #region write the LASzip VLR header
-                UInt32 i = Header.NumberOfVariableLengthRecords;
+                // UInt32 i = Header.NumberOfVariableLengthRecords;
 
                 UInt16 reserved = 0xAABB; // TODO: write 0 in LAS 1.5
                 streamOut.Write(BitConverter.GetBytes(reserved), 0, 2);
@@ -1054,14 +1049,21 @@ namespace LasZip
             }
             #endregion
 
+            if (this.LaxCreate)
+            {
+                // create spatial indexing information using cell_size = 100.0F and threshold = 1000
+                LasQuadTree lasquadtree = new();
+                lasquadtree.Setup(this.Header.MinX, this.Header.MaxX, this.Header.MinY, this.Header.MaxY, 100.0F);
+                this.laxIndex = new();
+                this.laxIndex.Prepare(lasquadtree, 1000);
+            }
+
             // set the point number and point count
             nPoints = Header.NumberOfPointRecords;
             currentPointIndex = 0;
-
-            return 0;
         }
 
-        public int WritePoint()
+        public void WritePoint()
         {
             if (writer == null)
             {
@@ -1069,17 +1071,35 @@ namespace LasZip
             }
 
             // write the point
-            if (!writer.Write(Point))
+            if (writer.Write(Point) == false)
             {
                 throw new InvalidOperationException(String.Format("writing point with index {0} of {1} total points", currentPointIndex, nPoints));
             }
 
             currentPointIndex++;
-
-            return 0;
         }
 
-        public int CloseWriter()
+        public void WriteIndexPoint()
+        {
+            this.WritePoint();
+
+            // index the point
+            double x = this.Header.XScaleFactor * this.Point.X + this.Header.XOffset;
+            double y = this.Header.YScaleFactor * this.Point.Y + this.Header.YOffset;
+            this.laxIndex.Add(x, y, (UInt32)(this.currentPointIndex - 1));
+        }
+
+        public void UpdateInventory()
+        {
+            if (this.inventory == null)
+            {
+                this.inventory = new();
+            }
+
+            this.inventory.Add(this.Point);
+        }
+
+        public void CloseWriter()
         {
             if (writer == null)
             {
@@ -1091,16 +1111,76 @@ namespace LasZip
             }
 
             this.writer = null;
+
+            // maybe update the header
+            if (this.inventory != null)
+            {
+                this.streamOut.Seek(107, SeekOrigin.Begin);
+                if (!this.streamOut.Put32bitsLE(this.inventory.NumberOfPointRecords))
+                {
+                    throw new IOException("updating this.inventory.number_of_point_records");
+                }
+                for (int i = 0; i < 5; i++)
+                {
+                    if (!this.streamOut.Put32bitsLE(this.inventory.NumberOfPointsByReturn[i + 1]))
+                    {
+                        throw new IOException("updating this.inventory.number_of_points_by_return[%d]\n", i);
+                    }
+                }
+                this.streamOut.Seek(179, SeekOrigin.Begin);
+                double value;
+                value = this.Header.XScaleFactor * this.inventory.MaxX + this.Header.XOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.max_X");
+                }
+                value = this.Header.XScaleFactor * this.inventory.MinX + this.Header.XOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.min_X");
+                }
+                value = this.Header.YScaleFactor * this.inventory.MinY + this.Header.YOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.max_Y");
+                }
+                value = this.Header.YScaleFactor * this.inventory.MinY + this.Header.YOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.min_Y");
+                }
+                value = this.Header.ZScaleFactor * this.inventory.MaxZ + this.Header.ZOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.max_Z");
+                }
+                value = this.Header.ZScaleFactor * this.inventory.MinZ + this.Header.ZOffset;
+                if (!this.streamOut.Put64bitsLE(value))
+                {
+                    throw new IOException("updating this.inventory.min_Z");
+                }
+                this.streamOut.Seek(0, SeekOrigin.End);
+
+                this.inventory = null;
+            }
+
+            if (this.laxIndex != null)
+            {
+                this.laxIndex.Complete(100000, -20);
+                this.laxIndex.Write(this.laxFileName);
+
+                this.laxFileName = null;
+                this.laxIndex = null;
+            }
+
             if ((leaveStreamOutOpen == false) && (this.streamOut != null))
             { 
                 this.streamOut.Close();
                 streamOut = null;
             }
-
-            return 0;
         }
 
-        public void OpenReader(Stream streamIn, ref bool isCompressed, bool leaveOpen = false)
+        public void OpenReader(Stream streamIn, out bool isCompressed, bool leaveOpen = false)
         {
             if (!streamIn.CanRead)
             {
@@ -1110,22 +1190,22 @@ namespace LasZip
             {
                 throw new InvalidOperationException("input stream is empty : nothing to read");
             }
-            if (writer != null)
-            {
-                throw new InvalidOperationException("writer is already open");
-            }
             if (reader != null)
             {
                 throw new InvalidOperationException("reader is already open");
+            }
+            if (writer != null)
+            {
+                throw new InvalidOperationException("writer is already open");
             }
 
             this.streamIn = streamIn;
             leaveStreamInOpen = leaveOpen;
 
-            this.OpenReaderStream(ref isCompressed);
+            this.OpenReaderStream(out isCompressed);
         }
 
-        public void OpenReader(string filePath, ref bool isCompressed)
+        public void OpenReader(string filePath, out bool isCompressed)
         {
             if (filePath == null || filePath.Length == 0)
             {
@@ -1144,10 +1224,17 @@ namespace LasZip
             this.streamIn = File.OpenRead(filePath);
             this.leaveStreamInOpen = false;
 
-            this.OpenReaderStream(ref isCompressed);
+            this.OpenReaderStream(out isCompressed);
+
+            // should we try to exploit existing spatial indexing information
+            if (this.LaxExploit)
+            {
+                this.laxIndex = new();
+                this.laxIndex.Read(filePath);
+            }
         }
 
-        private void OpenReaderStream(ref bool isCompressed)
+        private void OpenReaderStream(out bool isCompressed)
         {
             Debug.Assert(this.streamIn != null);
 
@@ -1717,12 +1804,60 @@ namespace LasZip
             currentPointIndex = 0;
         }
 
+        public void HasSpatialIndex(ref bool is_indexed, ref bool is_appended)
+        {
+            if (this.reader == null)
+            {
+                throw new InvalidOperationException("reader is not open");
+            }
+            if (this.writer != null)
+            {
+                throw new InvalidOperationException("writer is already open");
+            }
+
+            if (this.LaxExploit == false)
+            {
+                throw new InvalidOperationException("exploiting of spatial indexing not enabled before opening reader");
+            }
+
+            // check if reader found spatial indexing information when opening file
+
+            is_indexed = this.laxIndex != null;
+
+            // optional: inform whether spatial index is appended to LAZ file or in separate LAX file
+            is_appended = false;
+        }
+
+        public bool IsInsideRectangle(double r_min_x, double r_min_y, double r_max_x, double r_max_y)
+        {
+            if (this.reader == null)
+            {
+                throw new InvalidOperationException("reader is not open");
+            }
+            if (this.LaxExploit == false)
+            {
+                throw new InvalidOperationException("exploiting of spatial indexing not enabled before opening reader");
+            }
+
+            this.laxRminX = r_min_x;
+            this.laxRminY = r_min_y;
+            this.laxRmaxX = r_max_x;
+            this.laxRmaxY = r_max_y;
+
+            if (this.laxIndex != null)
+            {
+                return this.laxIndex.IntersectRectangle(r_min_x, r_min_y, r_max_x, r_max_y) == false;
+            }
+
+            return (this.Header.MinX > r_max_x) || (this.Header.MinY > r_max_y) || (this.Header.MaxX < r_min_x) || (this.Header.MaxY < r_min_y);
+        }
+
         public int SeekToPoint(long index)
         {
             // seek to the point
             if (!this.reader.Seek((UInt32)currentPointIndex, (UInt32)index))
             {
-                throw new InvalidOperationException(String.Format("seeking from index {0} to index {1} for file with {2} points", currentPointIndex, index, nPoints));
+                throw new InvalidOperationException("Seeking from index " + currentPointIndex + " to index " + index + " for file with " + nPoints + " points failed.");
             }
             currentPointIndex = index;
 
@@ -1746,6 +1881,42 @@ namespace LasZip
             return true;
         }
 
+        public bool TryReadInsidePoint()
+        {
+            bool foundPoint = false;
+            if (this.laxIndex != null)
+            {
+                while (this.laxIndex.SeekNext(this.reader, this.currentPointIndex))
+                {
+                    if (this.reader.TryRead(this.Point))
+                    {
+                        this.currentPointIndex++;
+                        double xy = this.Header.XScaleFactor * this.Point.X + this.Header.XOffset;
+                        if (xy < this.laxRminX || xy >= this.laxRmaxX) { continue; }
+                        xy = this.Header.YScaleFactor * this.Point.Y + this.Header.YOffset;
+                        if (xy < this.laxRminY || xy >= this.laxRmaxY) { continue; }
+                        foundPoint = true;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                while (this.reader.TryRead(this.Point))
+                {
+                    this.currentPointIndex++;
+                    double xy = this.Header.XScaleFactor * this.Point.X + this.Header.XOffset;
+                    if (xy < this.laxRminX || xy >= this.laxRmaxX) { continue; }
+                    xy = this.Header.YScaleFactor * this.Point.Y + this.Header.YOffset;
+                    if (xy < this.laxRminY || xy >= this.laxRmaxY) { continue; }
+                    foundPoint = true;
+                    break;
+                }
+            }
+
+            return foundPoint;
+        }
+
         public int CloseReader()
         {
             if (reader == null)
@@ -1764,6 +1935,7 @@ namespace LasZip
                 streamIn = null;
             }
 
+            this.laxIndex = null;
             return 0;
         }
     }

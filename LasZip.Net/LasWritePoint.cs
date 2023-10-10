@@ -52,11 +52,11 @@ namespace LasZip
             encoder = null;
             if (lazZip != null && lazZip.Compressor != 0)
             {
-                switch (lazZip.Coder)
+                encoder = lazZip.Coder switch
                 {
-                    case LasZip.CoderArithmetic: encoder = new ArithmeticEncoder(); break;
-                    default: throw new NotSupportedException("Entropy decoder not supported.");
-                }
+                    LasZip.CoderArithmetic => new ArithmeticEncoder(),
+                    _ => throw new NotSupportedException("Entropy decoder not supported."),
+                };
             }
 
             // initizalize the writers
@@ -213,13 +213,13 @@ namespace LasZip
 
         public bool Done()
         {
-            if (this.encoder == null)
-            {
-                throw new InvalidOperationException();
-            }
-
             if (writers == writersCompressed)
             {
+                if (this.encoder == null)
+                {
+                    throw new InvalidOperationException();
+                }
+
                 this.encoder.Done();
                 if (chunkStartPosition != 0)
                 {

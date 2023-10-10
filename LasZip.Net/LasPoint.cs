@@ -9,8 +9,8 @@ namespace LasZip
         public int Y { get; set; }
         public int Z { get; set; }
         public UInt16 Intensity { get; set; }
-        public byte Flags { get; set; }
-        public byte Classification { get; set; }
+        public byte ReturnNumbersAndFlags { get; set; } // ReturnNumber bits 0:2, NumberOfReturnsOfGivenPulse bits 3:5, ScanDirectionFlag bit 6, EdgeOfFlightLine bit 7
+        public byte ClassificationAndFlags { get; set; }
         public sbyte ScanAngleRank { get; set; }
         public byte UserData { get; set; }
         public UInt16 PointSourceID { get; set; }
@@ -35,13 +35,17 @@ namespace LasZip
         }
 
         //public byte return_number : 3 { get; set; }
-        public byte ReturnNumber { get { return (byte)(Flags & 7); } set { Flags = (byte)((Flags & 0xF8) | (value & 7)); } }
+        public byte ReturnNumber { get { return (byte)(ReturnNumbersAndFlags & 7); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0xF8) | (value & 7)); } }
         //public byte number_of_returns_of_given_pulse : 3;
-        public byte NumberOfReturnsOfGivenPulse { get { return (byte)((Flags >> 3) & 7); } set { Flags = (byte)((Flags & 0xC7) | ((value & 7) << 3)); } }
+        public byte NumberOfReturnsOfGivenPulse { get { return (byte)((ReturnNumbersAndFlags >> 3) & 7); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0xC7) | ((value & 7) << 3)); } }
         //public byte scan_direction_flag : 1;
-        public byte ScanDirectionFlag { get { return (byte)((Flags >> 6) & 1); } set { Flags = (byte)((Flags & 0xBF) | ((value & 1) << 6)); } }
+        public byte ScanDirectionFlag { get { return (byte)((ReturnNumbersAndFlags >> 6) & 1); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0xBF) | ((value & 1) << 6)); } }
         //public byte edge_of_flight_line : 1;
-        public byte EdgeOfFlightLine { get { return (byte)((Flags >> 7) & 1); } set { Flags = (byte)((Flags & 0x7F) | ((value & 1) << 7)); } }
+        public byte EdgeOfFlightLine { get { return (byte)((ReturnNumbersAndFlags >> 7) & 1); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0x7F) | ((value & 1) << 7)); } }
+
+        public byte SyntheticFlag { get { return (byte)((ClassificationAndFlags >> 5) & 1); } set { ClassificationAndFlags = (byte)((ClassificationAndFlags & 0xDF) | ((value & 1) << 5)); } }
+        public byte KeypointFlag { get { return (byte)((ClassificationAndFlags >> 6) & 1); } set { ClassificationAndFlags = (byte)((ClassificationAndFlags & 0xBF) | ((value & 1) << 6)); } }
+        public byte WithheldFlag { get { return (byte)((ClassificationAndFlags >> 7) & 1); } set { ClassificationAndFlags = (byte)((ClassificationAndFlags & 0x7F) | ((value & 1) << 7)); } }
 
         // LAS 1.4 only
         //public byte extended_point_type : 2;
@@ -62,8 +66,8 @@ namespace LasZip
             if (Z != other.Z) { return false; }
 
             if (Intensity != other.Intensity) { return false; }
-            if (Flags != other.Flags) { return false; }
-            if (Classification != other.Classification) { return false; }
+            if (ReturnNumbersAndFlags != other.ReturnNumbersAndFlags) { return false; }
+            if (ClassificationAndFlags != other.ClassificationAndFlags) { return false; }
             if (ScanAngleRank != other.ScanAngleRank) { return false; }
             if (UserData != other.UserData) { return false; }
 

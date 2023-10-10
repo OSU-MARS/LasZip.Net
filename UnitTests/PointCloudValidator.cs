@@ -11,8 +11,7 @@ namespace LasZip.UnitTests
         public PointCloud ReadAndValidate(string filePath, Version lasVersion, int pointDataFormat)
         {
             LasZipDll reader = new();
-            bool isCompressedFile = true;
-            reader.OpenReader(filePath, ref isCompressedFile);
+            reader.OpenReader(filePath, out bool isCompressedFile);
             Assert.IsTrue(isCompressedFile == filePath.EndsWith(".laz", StringComparison.Ordinal));
 
             this.ValidateHeader(reader, isCompressedFile, lasVersion, pointDataFormat);
@@ -24,7 +23,7 @@ namespace LasZip.UnitTests
             UInt64 pointIndex = 0;
             while (reader.TryReadPoint())
             {
-                Assert.IsTrue(reader.Point.Classification < 2);
+                Assert.IsTrue(reader.Point.ClassificationAndFlags < 2);
                 Assert.IsTrue(reader.Point.EdgeOfFlightLine == 0);
                 Assert.IsTrue(reader.Point.ExtendedClassification == 0);
                 Assert.IsTrue(reader.Point.ExtendedClassificationFlags == 0);
@@ -36,7 +35,7 @@ namespace LasZip.UnitTests
                 Assert.IsTrue(reader.Point.ExtendedScanAngle == 0);
                 Assert.IsTrue(reader.Point.ExtendedScannerChannel == 0);
                 Assert.IsTrue(reader.Point.ExtraBytes == null);
-                Assert.IsTrue(reader.Point.Flags == 0);
+                Assert.IsTrue(reader.Point.ReturnNumbersAndFlags == 0);
                 if (pointFormatHasGpsTime)
                 {
                     Assert.IsTrue(reader.Point.Gpstime > 1688896198.0); // July 2023

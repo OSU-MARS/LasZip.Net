@@ -4,15 +4,15 @@
     <TargetFramework>net7.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Platforms>AnyCPU;x64</Platforms>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <SignAssembly>True</SignAssembly>
     <AssemblyOriginatorKeyFile>StrongNameKey.snk</AssemblyOriginatorKeyFile>
-    <Copyright>.NET 7.0 version copyright © 2023 Oregon State University &lt;https://oregonstate.edu/&gt;. Copyright of C# port © 2014-2017 by Shinta &lt;shintadono@googlemail.com&gt;. Copyright © 2005-2014, martin isenburg &lt;martin.isenburg@rapidlasso.com&gt;, rapidlasso - tools to catch reality &lt;https://rapidlasso.de&gt;</Copyright>
+    <Copyright>.NET 7.0 version copyright © 2023 Oregon State University &lt;https://oregonstate.edu/&gt;. Copyright of C# port © 2014-2017 by Shinta &lt;shintadono@googlemail.com&gt;. Copyright © 2005-2015, martin isenburg &lt;martin.isenburg@rapidlasso.com&gt;, rapidlasso - tools to catch reality &lt;https://rapidlasso.de&gt;</Copyright>
     <Description>Classes for reading and writing of LAS/LAZ files. Ported from LASzip.</Description>
     <PackageId>$(AssemblyName)</PackageId>
     <RootNamespace>LasZip</RootNamespace>
-    <Version>2.2.14.0907</Version>
+    <Version>2.3.15.0605</Version>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>

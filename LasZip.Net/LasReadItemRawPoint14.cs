@@ -50,12 +50,17 @@ namespace LasZip
                 }
                 item.ScanDirectionFlag = p14->ScanDirectionFlag;
                 item.EdgeOfFlightLine = p14->EdgeOfFlightLine;
-                item.Classification = (byte)((p14->ClassificationFlags << 5) | (p14->Classification & 31));
+                
+                if (p14->Classification < 32)
+                {
+                    item.ClassificationAndFlags |= p14->Classification;
+                }
+                
                 item.ScanAngleRank = MyDefs.ClampInt8(MyDefs.QuantizeInt16(p14->ScanAngle * 0.006));
                 item.UserData = p14->UserData;
                 item.PointSourceID = p14->PointSourceID;
                 item.ExtendedScannerChannel = p14->ScannerChannel;
-                item.ExtendedClassificationFlags = (byte)(p14->ClassificationFlags & 8); // TODO Häää?
+                item.ExtendedClassificationFlags = p14->ClassificationFlags;
                 item.ExtendedClassification = p14->Classification;
                 item.ExtendedReturnNumber = p14->ReturnNumber;
                 item.ExtendedNumberOfReturnsOfGivenPulse = p14->NumberOfReturnsOfGivenPulse;

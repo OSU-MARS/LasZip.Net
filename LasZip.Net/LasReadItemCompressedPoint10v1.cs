@@ -73,8 +73,8 @@ namespace LasZip
             last.Y = item.Y;
             last.Z = item.Z;
             last.Intensity = item.Intensity;
-            last.Flags = item.Flags;
-            last.Classification = item.Classification;
+            last.ReturnNumbersAndFlags = item.ReturnNumbersAndFlags;
+            last.Classification = item.ClassificationAndFlags;
             last.ScanAngleRank = item.ScanAngleRank;
             last.UserData = item.UserData;
             last.PointSourceID = item.PointSourceID;
@@ -139,12 +139,12 @@ namespace LasZip
                 // decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
                 if ((changed_values & 16) != 0)
                 {
-                    if (bitByte[last.Flags] == null)
+                    if (bitByte[last.ReturnNumbersAndFlags] == null)
                     {
-                        bitByte[last.Flags] = ArithmeticDecoder.CreateSymbolModel(256);
-                        ArithmeticDecoder.InitSymbolModel(bitByte[last.Flags]);
+                        bitByte[last.ReturnNumbersAndFlags] = ArithmeticDecoder.CreateSymbolModel(256);
+                        ArithmeticDecoder.InitSymbolModel(bitByte[last.ReturnNumbersAndFlags]);
                     }
-                    last.Flags = (byte)dec.DecodeSymbol(bitByte[last.Flags]);
+                    last.ReturnNumbersAndFlags = (byte)dec.DecodeSymbol(bitByte[last.ReturnNumbersAndFlags]);
                 }
 
                 // decompress the classification ... if it has changed
@@ -193,8 +193,8 @@ namespace LasZip
             item.Y = last.Y;
             item.Z = last.Z;
             item.Intensity = last.Intensity;
-            item.Flags = last.Flags;
-            item.Classification = last.Classification;
+            item.ReturnNumbersAndFlags = last.ReturnNumbersAndFlags;
+            item.ClassificationAndFlags = last.Classification;
             item.ScanAngleRank = last.ScanAngleRank;
             item.UserData = last.UserData;
             item.PointSourceID = last.PointSourceID;

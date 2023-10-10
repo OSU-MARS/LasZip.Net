@@ -54,8 +54,6 @@ namespace LasZip
         public override bool TryRead(LasPoint item)
         {
             int corr;
-            int diff = 0;
-
             UInt32 sym = dec.DecodeSymbol(byteUsed);
             if ((sym & (1 << 0)) != 0)
             {
@@ -77,6 +75,7 @@ namespace LasZip
                 item.Rgb[0] |= (UInt16)(lastItem[0] & 0xFF00);
             }
 
+            int diff;
             if ((sym & (1 << 6)) != 0)
             {
                 diff = (item.Rgb[0] & 0x00FF) - (lastItem[0] & 0x00FF);

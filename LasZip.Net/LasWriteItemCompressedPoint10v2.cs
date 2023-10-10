@@ -107,8 +107,8 @@ namespace LasZip
             last.Y = item.Y;
             last.Z = item.Z;
             last.Intensity = 0; // but set intensity to zero
-            last.Flags = item.Flags;
-            last.Classification = item.Classification;
+            last.ReturnNumbersAndFlags = item.ReturnNumbersAndFlags;
+            last.Classification = item.ClassificationAndFlags;
             last.ScanAngleRank = item.ScanAngleRank;
             last.UserData = item.UserData;
             last.PointSourceID = item.PointSourceID;
@@ -126,9 +126,9 @@ namespace LasZip
             // compress which other values have changed
             UInt32 changed_values = 0;
 
-            bool needFlags = last.Flags != item.Flags; if (needFlags) changed_values |= 32; // bit_byte
+            bool needFlags = last.ReturnNumbersAndFlags != item.ReturnNumbersAndFlags; if (needFlags) changed_values |= 32; // bit_byte
             bool needIntensity = last_intensity[m] != item.Intensity; if (needIntensity) changed_values |= 16;
-            bool needClassification = last.Classification != item.Classification; if (needClassification) changed_values |= 8;
+            bool needClassification = last.Classification != item.ClassificationAndFlags; if (needClassification) changed_values |= 8;
             bool needScanAngleRank = last.ScanAngleRank != item.ScanAngleRank; if (needScanAngleRank) changed_values |= 4;
             bool needUserData = last.UserData != item.UserData; if (needUserData) changed_values |= 2;
             bool needPointSourceID = last.PointSourceID != item.PointSourceID; if (needPointSourceID) changed_values |= 1;
@@ -138,12 +138,12 @@ namespace LasZip
             // compress the bit_byte (edge_of_flight_line, scan_direction_flag, returns, ...) if it has changed
             if (needFlags)
             {
-                if (bitByte[last.Flags] == null)
+                if (bitByte[last.ReturnNumbersAndFlags] == null)
                 {
-                    bitByte[last.Flags] = ArithmeticEncoder.CreateSymbolModel(256);
-                    ArithmeticEncoder.InitSymbolModel(bitByte[last.Flags]);
+                    bitByte[last.ReturnNumbersAndFlags] = ArithmeticEncoder.CreateSymbolModel(256);
+                    ArithmeticEncoder.InitSymbolModel(bitByte[last.ReturnNumbersAndFlags]);
                 }
-                enc.EncodeSymbol(bitByte[last.Flags], item.Flags);
+                enc.EncodeSymbol(bitByte[last.ReturnNumbersAndFlags], item.ReturnNumbersAndFlags);
             }
 
             // compress the intensity if it has changed
@@ -161,7 +161,7 @@ namespace LasZip
                     classification[last.Classification] = ArithmeticEncoder.CreateSymbolModel(256);
                     ArithmeticEncoder.InitSymbolModel(classification[last.Classification]);
                 }
-                enc.EncodeSymbol(classification[last.Classification], item.Classification);
+                enc.EncodeSymbol(classification[last.Classification], item.ClassificationAndFlags);
             }
 
             // compress the scan_angle_rank ... if it has changed
@@ -210,8 +210,8 @@ namespace LasZip
             last.Y = item.Y;
             last.Z = item.Z;
             last.Intensity = item.Intensity;
-            last.Flags = item.Flags;
-            last.Classification = item.Classification;
+            last.ReturnNumbersAndFlags = item.ReturnNumbersAndFlags;
+            last.Classification = item.ClassificationAndFlags;
             last.ScanAngleRank = item.ScanAngleRank;
             last.UserData = item.UserData;
             last.PointSourceID = item.PointSourceID;

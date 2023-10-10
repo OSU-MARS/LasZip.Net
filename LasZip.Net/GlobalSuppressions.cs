@@ -5,9 +5,6 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.ClassificationFlags")]
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.EdgeOfFlightLine")]
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.NumberOfReturnsOfGivenPulse")]
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.ReturnNumber")]
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.ScanDirectionFlag")]
-[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "member", Target = "~P:LasZip.LasPoint14.ScannerChannel")]
+[assembly: SuppressMessage("Style", "IDE0251:Make member 'readonly'", Justification = "rule misses set of flags in VS 17.7.4", Scope = "type", Target = "~T:LasZip.LasPoint14")]
+[assembly: SuppressMessage("Style", "IDE0270:Use coalesce expression", Justification = "readability", Scope = "type", Target = "~T:LasZip.LasZip")]
+[assembly: SuppressMessage("Style", "IDE0270:Use coalesce expression", Justification = "readability", Scope = "type", Target = "~T:LasZip.LasZipDll")]

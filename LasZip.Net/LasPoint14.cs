@@ -11,7 +11,7 @@ namespace LasZip
         public int Y { get; set; }
         public int Z { get; set; }
         public UInt16 Intensity { get; set; }
-        public byte Returns { get; set; }
+        public byte ReturnNumbersAndFlags { get; set; }
         public byte Flags { get; set; }
 
         public byte Classification { get; set; }
@@ -21,9 +21,9 @@ namespace LasZip
         public double Gpstime { get; set; }
 
         //public byte return_number : 4;
-        public byte ReturnNumber { get { return (byte)(Returns & 0xF); } set { Returns = (byte)((Returns & 0xF0) | (value & 0xF)); } }
+        public byte ReturnNumber { get { return (byte)(ReturnNumbersAndFlags & 0xF); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0xF0) | (value & 0xF)); } }
         //public byte number_of_returns_of_given_pulse : 4;
-        public byte NumberOfReturnsOfGivenPulse { get { return (byte)((Returns >> 4) & 0xF); } set { Returns = (byte)((Returns & 0xF) | ((value & 0xF) << 4)); } }
+        public byte NumberOfReturnsOfGivenPulse { get { return (byte)((ReturnNumbersAndFlags >> 4) & 0xF); } set { ReturnNumbersAndFlags = (byte)((ReturnNumbersAndFlags & 0xF) | ((value & 0xF) << 4)); } }
 
         //public byte classification_flags : 4;
         public byte ClassificationFlags { get { return (byte)(Flags & 0xF); } set { Flags = (byte)((Flags & 0xF0) | (value & 0xF)); } }
