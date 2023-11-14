@@ -5,20 +5,16 @@ namespace LasZip
 {
     internal class LasReadItemRawByte : LasReadItemRaw
     {
-        private readonly UInt32 number = 0;
+        private readonly int number = 0;
 
         public LasReadItemRawByte(UInt32 number) 
         { 
-            this.number = number; 
+            this.number = (int)number; 
         }
 
-        public override bool TryRead(LasPoint item)
+        public override bool TryRead(Span<byte> item, UInt32 context)
         {
-            if (this.inStream.Read(item.ExtraBytes, 0, (int)number) != (int)number)
-            {
-                return false;
-            }
-
+            this.InStream.ReadExactly(item[..this.number]);
             return true;
         }
     }

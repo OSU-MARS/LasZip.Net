@@ -6,32 +6,30 @@ namespace LasZip
 {
     internal class LasReadItemCompressedByteV2 : LasReadItemCompressed
     {
-        private readonly ArithmeticDecoder dec;
-        private readonly UInt32 number;
+        private readonly ArithmeticDecoder decoder;
+        private readonly int number;
         private readonly byte[] lastItem;
 
         private readonly ArithmeticModel[] mByte;
 
-        public LasReadItemCompressedByteV2(ArithmeticDecoder dec, UInt32 number)
+        public LasReadItemCompressedByteV2(ArithmeticDecoder decoder, UInt32 number)
         {
-            // set decoder
-            Debug.Assert(dec != null);
-            this.dec = dec;
             Debug.Assert(number > 0);
-            this.number = number;
+            this.decoder = decoder;
+            this.number = (int)number;
 
             // create models and integer compressors
-            mByte = new ArithmeticModel[number];
+            this.mByte = new ArithmeticModel[number];
             for (UInt32 i = 0; i < number; i++)
             {
-                mByte[i] = ArithmeticDecoder.CreateSymbolModel(256);
+                this.mByte[i] = ArithmeticDecoder.CreateSymbolModel(256);
             }
 
             // create last item
-            lastItem = new byte[number];
+            this.lastItem = new byte[number];
         }
 
-        public override bool Init(LasPoint item)
+        public override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
             // init state
 
@@ -42,20 +40,20 @@ namespace LasZip
             }
 
             // init last item
-            Buffer.BlockCopy(item.ExtraBytes, 0, lastItem, 0, (int)number);
+            item[..this.number].CopyTo(this.lastItem);
 
             return true;
         }
 
-        public override bool TryRead(LasPoint item)
+        public override bool TryRead(Span<byte> item, UInt32 context)
         {
-            for (UInt32 i = 0; i < number; i++)
+            for (int i = 0; i < number; i++)
             {
-                int value = (int)(lastItem[i] + dec.DecodeSymbol(mByte[i]));
-                item.ExtraBytes[i] = (byte)MyDefs.FoldUint8(value);
+                int value = (int)(lastItem[i] + decoder.DecodeSymbol(mByte[i]));
+                item[i] = (byte)MyDefs.FoldUInt8(value);
             }
 
-            Buffer.BlockCopy(item.ExtraBytes, 0, lastItem, 0, (int)number);
+            item[..this.number].CopyTo(this.lastItem);
             return true;
         }
     }

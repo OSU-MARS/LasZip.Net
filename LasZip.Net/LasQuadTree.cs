@@ -12,15 +12,15 @@ namespace LasZip
     {
         private const UInt32 LAS_SPATIAL_QUAD_TREE = 0;
 
-        private UInt32 sub_level;
-        private UInt32 sub_level_index;
-        private readonly UInt32[] level_offset;
-        private readonly UInt32[] coarser_indices;
-        private UInt32 adaptive_alloc;
+        private UInt32 subLevel;
+        private UInt32 subLevelIndex;
+        private readonly UInt32[] levelOffset;
+        private readonly UInt32[] coarserIndices;
+        private UInt32 adaptiveAlloc;
         private UInt32[]? adaptive;
 
-        private List<UInt32>? current_cells;
-        private int next_cell_index;
+        private List<UInt32>? currentCells;
+        private int nextCellIndex;
 
         public UInt32 Levels { get; set; }
         public float CellSize { get; set; }
@@ -35,27 +35,27 @@ namespace LasZip
 
         public LasQuadTree()
         {
-            this.level_offset = new UInt32[24];
-            this.coarser_indices = new UInt32[4];
+            this.levelOffset = new UInt32[20];
+            this.coarserIndices = new UInt32[4];
 
-            Levels = 0;
-            CellSize = 0;
-            MinX = 0;
-            MaxX = 0;
-            MinY = 0;
-            MaxY = 0;
-            CellsX = 0;
-            CellsY = 0;
-            sub_level = 0;
-            sub_level_index = 0;
-            level_offset[0] = 0;
-            for (int l = 0; l < 23; l++)
+            this.Levels = 0;
+            this.CellSize = 0;
+            this.MinX = 0;
+            this.MaxX = 0;
+            this.MinY = 0;
+            this.MaxY = 0;
+            this.CellsX = 0;
+            this.CellsY = 0;
+            this.subLevel = 0;
+            this.subLevelIndex = 0;
+            this.levelOffset[0] = 0;
+            for (int l = 0; l < 16; l++) // TODO: why doesn't l traverse full range of levelOffset? (or why is levelOffset longer than l?)
             {
-                level_offset[l + 1] = level_offset[l] + (UInt32)((1 << l) * (1 << l));
+                this.levelOffset[l + 1] = this.levelOffset[l] + (UInt32)((1 << l) * (1 << l));
             }
-            current_cells = null;
-            adaptive_alloc = 0;
-            adaptive = null;
+            this.currentCells = null;
+            this.adaptiveAlloc = 0;
+            this.adaptive = null;
         }
 
         // returns the bounding box of the cell that x & y fall into at the specified level
@@ -345,13 +345,13 @@ namespace LasZip
         // returns the index of the cell that x & y fall into at the specified level
         public UInt32 GetCellIndex(double x, double y, UInt32 level)
         {
-            if (sub_level != 0)
+            if (subLevel != 0)
             {
-                return (UInt32)(level_offset[sub_level + level] + (sub_level_index << (int)(level * 2)) + GetLevelIndex(x, y, level));
+                return (UInt32)(levelOffset[subLevel + level] + (subLevelIndex << (int)(level * 2)) + GetLevelIndex(x, y, level));
             }
             else
             {
-                return level_offset[level] + GetLevelIndex(x, y, level);
+                return levelOffset[level] + GetLevelIndex(x, y, level);
             }
         }
 
@@ -373,7 +373,7 @@ namespace LasZip
             if ((num_cell_indices != 0) && (cell_indices != null))
             {
                 num_cell_indices = 4;
-                cell_indices = this.coarser_indices;
+                cell_indices = this.coarserIndices;
                 level_index = level_index << 2;
                 cell_indices[0] = GetCellIndex(level_index + 0, level);
                 cell_indices[1] = GetCellIndex(level_index + 1, level);
@@ -386,13 +386,13 @@ namespace LasZip
         // returns the level index of the cell index at the specified level
         public UInt32 GetLevelIndex(UInt32 cell_index, UInt32 level)
         {
-            if (sub_level != 0)
+            if (subLevel != 0)
             {
-                return (UInt32)(cell_index - (sub_level_index << (int)(level * 2)) - level_offset[sub_level + level]);
+                return (UInt32)(cell_index - (subLevelIndex << (int)(level * 2)) - levelOffset[subLevel + level]);
             }
             else
             {
-                return cell_index - level_offset[level];
+                return cell_index - levelOffset[level];
             }
         }
 
@@ -406,20 +406,20 @@ namespace LasZip
         public UInt32 GetLevel(UInt32 cell_index)
         {
             UInt32 level = 0;
-            while (cell_index >= level_offset[level + 1]) { level++; }
+            while (cell_index >= levelOffset[level + 1]) { level++; }
             return level;
         }
 
         // returns the cell index of the level index at the specified level
         public UInt32 GetCellIndex(UInt32 level_index, UInt32 level)
         {
-            if (sub_level != 0)
+            if (subLevel != 0)
             {
-                return (UInt32)(level_index + (sub_level_index << (int)(level * 2)) + level_offset[sub_level + level]);
+                return (UInt32)(level_index + (subLevelIndex << (int)(level * 2)) + levelOffset[subLevel + level]);
             }
             else
             {
-                return level_index + level_offset[level];
+                return level_index + levelOffset[level];
             }
         }
 
@@ -446,7 +446,7 @@ namespace LasZip
         // returns the maximal cell index at the specified level
         public UInt32 GetMaxCellIndex(UInt32 level)
         {
-            return this.level_offset[level + 1] - 1;
+            return this.levelOffset[level + 1] - 1;
         }
 
         // returns the maximal cell index
@@ -529,7 +529,7 @@ namespace LasZip
         }
 
         // read from file
-        public bool Read(ByteStreamIn stream)
+        public bool Read(Stream stream)
         {
             // read data in the following order
             //     UInt32  levels          4 bytes 
@@ -542,21 +542,21 @@ namespace LasZip
             // which totals 28 bytes
 
             Span<byte> readBuffer = stackalloc byte[4];
-            stream.GetBytes(readBuffer, 4);
+            stream.ReadExactly(readBuffer);
             string signature = Encoding.UTF8.GetString(readBuffer);
             if (String.Equals(signature, "LASS", StringComparison.Ordinal) == false)
             {
                 throw new ArgumentException("wrong LASspatial signature %4s instead of 'LASS'");
             }
 
-            stream.GetBytes(readBuffer, 4);
+            stream.ReadExactly(readBuffer);
             UInt32 type = BitConverter.ToUInt32(readBuffer);
             if (type != LAS_SPATIAL_QUAD_TREE)
             {
                 throw new ArgumentException("unknown LASspatial type " + type);
             }
 
-            stream.GetBytes(readBuffer, 4);
+            stream.ReadExactly(readBuffer);
             signature = Encoding.UTF8.GetString(readBuffer);
             if (String.Equals(signature, "LASQ", StringComparison.Ordinal) == false)
             {
@@ -566,26 +566,21 @@ namespace LasZip
             }
             else
             {
-                stream.Get32bitsLE(readBuffer); // version
-                stream.Get32bitsLE(readBuffer);
-                this.Levels = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+                stream.ReadExactly(readBuffer); // version
+                this.Levels = stream.ReadUInt32LittleEndian();
             }
 
-            stream.Get32bitsLE(readBuffer); // level_index
-            stream.Get32bitsLE(readBuffer); // implicit_levels
+            stream.ReadExactly(readBuffer); // level_index
+            stream.ReadExactly(readBuffer); // implicit_levels
 
-            stream.Get32bitsLE(readBuffer);
-            this.MinX = BinaryPrimitives.ReadSingleLittleEndian(readBuffer);
-            stream.Get32bitsLE(readBuffer);
-            this.MaxX = BinaryPrimitives.ReadSingleLittleEndian(readBuffer);
-            stream.Get32bitsLE(readBuffer);
-            this.MinY = BinaryPrimitives.ReadSingleLittleEndian(readBuffer);
-            stream.Get32bitsLE(readBuffer);
-            this.MaxY = BinaryPrimitives.ReadSingleLittleEndian(readBuffer);
+            this.MinX = stream.ReadSingleLittleEndian();
+            this.MaxX = stream.ReadSingleLittleEndian();
+            this.MinY = stream.ReadSingleLittleEndian();
+            this.MaxY = stream.ReadSingleLittleEndian();
             return true;
         }
 
-        public bool Write(ByteStreamOut stream)
+        public bool Write(Stream stream)
         {
             // which totals 28 bytes
             //     UInt32  levels          4 bytes 
@@ -596,59 +591,28 @@ namespace LasZip
             //     float  min_y           4 bytes 
             //     float  max_y           4 bytes 
             // which totals 28 bytes
-
-            if (!stream.PutBytes(Encoding.UTF8.GetBytes("LASS"), 4))
-            {
-                throw new IOException("writing LASspatial signature");
-            }
+            stream.Write(Encoding.UTF8.GetBytes("LASS"));
 
             UInt32 type = LAS_SPATIAL_QUAD_TREE;
-            if (!stream.Put32bitsLE(type))
-            {
-                throw new IOException("writing LASspatial type " + type);
-            }
+            stream.WriteLittleEndian(type);
 
-            if (!stream.PutBytes(Encoding.UTF8.GetBytes("LASQ"), 4))
-            {
-                throw new IOException("writing signature");
-            }
+            stream.Write(Encoding.UTF8.GetBytes("LASQ"));
 
             UInt32 version = 0;
-            if (!stream.Put32bitsLE(version))
-            {
-                throw new IOException("writing version");
-            }
+            stream.WriteLittleEndian(version);
 
-            if (!stream.Put32bitsLE(Levels))
-            {
-                throw new IOException("writing levels " + Levels);
-            }
+            stream.WriteLittleEndian(this.Levels);
+
             UInt32 level_index = 0;
-            if (!stream.Put32bitsLE(level_index))
-            {
-                throw new IOException("writing level_index " + level_index);
-            }
+            stream.WriteLittleEndian(level_index);
+
             UInt32 implicit_levels = 0;
-            if (!stream.Put32bitsLE(implicit_levels))
-            {
-                throw new IOException("writing implicit_levels " + implicit_levels);
-            }
-            if (!stream.Put32bitsLE(MinX))
-            {
-                throw new IOException("writing min_x " + MinX);
-            }
-            if (!stream.Put32bitsLE(MaxX))
-            {
-                throw new IOException("writing max_x " + MaxX);
-            }
-            if (!stream.Put32bitsLE(MinY))
-            {
-                throw new IOException("writing min_y " + MinY);
-            }
-            if (!stream.Put32bitsLE(MaxY))
-            {
-                throw new IOException("writing max_y " + MaxY);
-            }
+            stream.WriteLittleEndian(implicit_levels);
+            
+            stream.WriteLittleEndian(this.MinX);
+            stream.WriteLittleEndian(this.MaxX);
+            stream.WriteLittleEndian(this.MinY);
+            stream.WriteLittleEndian(this.MaxY);
             return true;
         }
 
@@ -657,19 +621,19 @@ namespace LasZip
         {
             UInt32 adaptive_pos = cell_index / 32;
             UInt32 adaptive_bit = (1U) << (int)(cell_index % 32);
-            if (adaptive_pos >= adaptive_alloc)
+            if (adaptive_pos >= adaptiveAlloc)
             {
                 if (adaptive != null)
                 {
                     adaptive = adaptive.Extend(2 * adaptive_pos);
-                    for (UInt32 i = adaptive_alloc; i < adaptive_pos * 2; i++) { adaptive[i] = 0; }
-                    adaptive_alloc = adaptive_pos * 2;
+                    for (UInt32 i = adaptiveAlloc; i < adaptive_pos * 2; i++) { adaptive[i] = 0; }
+                    adaptiveAlloc = adaptive_pos * 2;
                 }
                 else
                 {
                     adaptive = new UInt32[adaptive_pos + 1];
                     // for (UInt32 i = adaptive_alloc; i <= adaptive_pos; i++) { adaptive[i] = 0; }
-                    adaptive_alloc = adaptive_pos + 1;
+                    adaptiveAlloc = adaptive_pos + 1;
                 }
             }
             adaptive[adaptive_pos] &= ~adaptive_bit;
@@ -697,13 +661,13 @@ namespace LasZip
 
         public UInt32 IntersectRectangle(double r_min_x, double r_min_y, double r_max_x, double r_max_y, UInt32 level)
         {
-            if (current_cells == null)
+            if (currentCells == null)
             {
-                current_cells = new();
+                currentCells = new();
             }
             else
             {
-                current_cells.Clear();
+                currentCells.Clear();
             }
 
             if (r_max_x <= MinX || !(r_min_x <= MaxX) || r_max_y <= MinY || !(r_min_y <= MaxY))
@@ -720,7 +684,7 @@ namespace LasZip
                 IntersectRectangleWithCells(r_min_x, r_min_y, r_max_x, r_max_y, MinX, MaxX, MinY, MaxY, level, 0);
             }
 
-            return (UInt32)current_cells.Count;
+            return (UInt32)currentCells.Count;
         }
 
         public UInt32 IntersectRectangle(double r_min_x, double r_min_y, double r_max_x, double r_max_y)
@@ -730,13 +694,13 @@ namespace LasZip
 
         public UInt32 IntersectTile(float ll_x, float ll_y, float size, UInt32 level)
         {
-            if (current_cells == null)
+            if (currentCells == null)
             {
-                current_cells = new();
+                currentCells = new();
             }
             else
             {
-                current_cells.Clear();
+                currentCells.Clear();
             }
 
             float ur_x = ll_x + size;
@@ -756,7 +720,7 @@ namespace LasZip
                 IntersectTileWithCells(ll_x, ll_y, ur_x, ur_y, MinX, MaxX, MinY, MaxY, level, 0);
             }
 
-            return (UInt32)current_cells.Count;
+            return (UInt32)currentCells.Count;
         }
 
         public UInt32 IntersectTile(float ll_x, float ll_y, float size)
@@ -766,13 +730,13 @@ namespace LasZip
 
         public UInt32 IntersectCircle(double center_x, double center_y, double radius, UInt32 level)
         {
-            if (current_cells == null)
+            if (currentCells == null)
             {
-                current_cells = new();
+                currentCells = new();
             }
             else
             {
-                current_cells.Clear();
+                currentCells.Clear();
             }
 
             double r_min_x = center_x - radius;
@@ -793,7 +757,7 @@ namespace LasZip
                 IntersectCircleWithCells(center_x, center_y, radius, r_min_x, r_min_y, r_max_x, r_max_y, MinX, MaxX, MinY, MaxY, level, 0);
             }
 
-            return (UInt32)current_cells.Count;
+            return (UInt32)currentCells.Count;
         }
 
         public UInt32 IntersectCircle(double center_x, double center_y, double radius)
@@ -880,7 +844,7 @@ namespace LasZip
             }
             else
             {
-                current_cells.Add(level_index);
+                currentCells.Add(level_index);
             }
         }
 
@@ -966,7 +930,7 @@ namespace LasZip
             }
             else
             {
-                current_cells.Add(cell_index);
+                currentCells.Add(cell_index);
             }
         }
 
@@ -1049,7 +1013,7 @@ namespace LasZip
             }
             else
             {
-                current_cells.Add(level_index);
+                currentCells.Add(level_index);
             }
         }
 
@@ -1135,7 +1099,7 @@ namespace LasZip
             }
             else
             {
-                current_cells.Add(cell_index);
+                currentCells.Add(cell_index);
             }
         }
 
@@ -1220,7 +1184,7 @@ namespace LasZip
             {
                 if (IntersectCircleWithRectangle(center_x, center_y, radius, cell_min_x, cell_max_x, cell_min_y, cell_max_y))
                 {
-                    current_cells.Add(level_index);
+                    currentCells.Add(level_index);
                 }
             }
         }
@@ -1309,7 +1273,7 @@ namespace LasZip
             {
                 if (IntersectCircleWithRectangle(center_x, center_y, radius, cell_min_x, cell_max_x, cell_min_y, cell_max_y))
                 {
-                    current_cells.Add(cell_index);
+                    currentCells.Add(cell_index);
                 }
             }
         }
@@ -1381,12 +1345,12 @@ namespace LasZip
 
         public bool GetIntersectedCells()
         {
-            next_cell_index = 0;
-            if (current_cells == null)
+            nextCellIndex = 0;
+            if (currentCells == null)
             {
                 return false;
             }
-            if (current_cells.Count == 0)
+            if (currentCells.Count == 0)
             {
                 return false;
             }
@@ -1395,31 +1359,31 @@ namespace LasZip
 
         public bool HasMoreCells()
         {
-            if (current_cells == null)
+            if (currentCells == null)
             {
                 return false;
             }
-            if (next_cell_index >= current_cells.Count)
+            if (nextCellIndex >= currentCells.Count)
             {
                 return false;
             }
             if (adaptive != null)
             {
-                CurrentCell = current_cells[next_cell_index];
+                CurrentCell = currentCells[nextCellIndex];
             }
             else
             {
-                CurrentCell = level_offset[Levels] + current_cells[next_cell_index];
+                CurrentCell = levelOffset[Levels] + currentCells[nextCellIndex];
             }
-            next_cell_index++;
+            nextCellIndex++;
             return true;
         }
 
         public bool Setup(double bb_min_x, double bb_max_x, double bb_min_y, double bb_max_y, float cell_size)
         {
             this.CellSize = cell_size;
-            this.sub_level = 0;
-            this.sub_level_index = 0;
+            this.subLevel = 0;
+            this.subLevelIndex = 0;
 
             // enlarge bounding box to units of cells
             if (bb_min_x >= 0) MinX = cell_size * ((int)(bb_min_x / cell_size));
@@ -1432,8 +1396,8 @@ namespace LasZip
             else MaxY = cell_size * ((int)(bb_max_y / cell_size));
 
             // how many cells minimally in each direction
-            CellsX = MyDefs.QuantizeUInt32((MaxX - MinX) / cell_size);
-            CellsY = MyDefs.QuantizeUInt32((MaxY - MinY) / cell_size);
+            CellsX = MyDefs.QuantizeUInt32((this.MaxX - this.MinX) / cell_size);
+            CellsY = MyDefs.QuantizeUInt32((this.MaxY - this.MinY) / cell_size);
 
             if (CellsX == 0 || CellsY == 0)
             {
@@ -1468,8 +1432,8 @@ namespace LasZip
         public bool Setup(double bb_min_x, double bb_max_x, double bb_min_y, double bb_max_y, float cell_size, float offset_x, float offset_y)
         {
             this.CellSize = cell_size;
-            this.sub_level = 0;
-            this.sub_level_index = 0;
+            this.subLevel = 0;
+            this.subLevelIndex = 0;
 
             // enlarge bounding box to units of cells
             if ((bb_min_x - offset_x) >= 0) MinX = cell_size * ((int)((bb_min_x - offset_x) / cell_size)) + offset_x;
@@ -1482,35 +1446,35 @@ namespace LasZip
             else MaxY = cell_size * ((int)((bb_max_y - offset_y) / cell_size)) + offset_y;
 
             // how many cells minimally in each direction
-            CellsX = MyDefs.QuantizeUInt32((MaxX - MinX) / cell_size);
-            CellsY = MyDefs.QuantizeUInt32((MaxY - MinY) / cell_size);
+            this.CellsX = MyDefs.QuantizeUInt32((this.MaxX - this.MinX) / cell_size);
+            this.CellsY = MyDefs.QuantizeUInt32((this.MaxY - this.MinY) / cell_size);
 
-            if (CellsX == 0 || CellsY == 0)
+            if ((this.CellsX == 0) || (this.CellsY == 0))
             {
-                throw new InvalidOperationException("cells_x " + CellsX + " cells_y " + CellsY);
+                throw new InvalidOperationException("cells_x " + this.CellsX + " cells_y " + this.CellsY);
             }
 
             // how many quad tree levels to get to that many cells
-            UInt32 c = ((CellsX > CellsY) ? CellsX - 1 : CellsY - 1);
-            Levels = 0;
+            UInt32 c = ((this.CellsX > this.CellsY) ? this.CellsX - 1 : this.CellsY - 1);
+            this.Levels = 0;
             while (c != 0)
             {
                 c = c >> 1;
-                Levels++;
+                this.Levels++;
             }
 
             // enlarge bounding box to quad tree size
             UInt32 c1, c2;
-            c = (1U << (int)Levels) - CellsX;
+            c = (1U << (int)this.Levels) - this.CellsX;
             c1 = c / 2;
             c2 = c - c1;
-            MinX -= (c2 * cell_size);
-            MaxX += (c1 * cell_size);
-            c = (1U << (int)Levels) - CellsY;
+            this.MinX -= (c2 * cell_size);
+            this.MaxX += (c1 * cell_size);
+            c = (1U << (int)this.Levels) - this.CellsY;
             c1 = c / 2;
             c2 = c - c1;
-            MinY -= (c2 * cell_size);
-            MaxY += (c1 * cell_size);
+            this.MinY -= (c2 * cell_size);
+            this.MaxY += (c1 * cell_size);
 
             return true;
         }
@@ -1522,8 +1486,8 @@ namespace LasZip
             this.MinY = min_y;
             this.MaxY = max_y;
             this.Levels = levels;
-            this.sub_level = 0;
-            this.sub_level_index = 0;
+            this.subLevel = 0;
+            this.subLevelIndex = 0;
             return true;
         }
 
@@ -1540,8 +1504,8 @@ namespace LasZip
             this.MaxX = max[0];
             this.MinY = min[1];
             this.MaxY = max[1];
-            this.sub_level = sub_level;
-            this.sub_level_index = sub_level_index;
+            this.subLevel = sub_level;
+            this.subLevelIndex = sub_level_index;
             this.Levels = levels;
             return true;
         }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net7.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
@@ -11,7 +11,7 @@
     <Description>Classes for reading and writing of LAS/LAZ files. Ported from LASzip.</Description>
     <PackageId>$(AssemblyName)</PackageId>
     <RootNamespace>LasZip</RootNamespace>
-    <Version>2.3.15.0605</Version>
+    <Version>3.4.4.23102</Version>
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 

@@ -20,9 +20,9 @@ namespace LasZip.UnitTests
             double[] coordinates = new double[3];
             UInt64 numberOfPointRecords = UInt64.Max(reader.Header.ExtendedNumberOfPointRecords, reader.Header.NumberOfPointRecords);
             bool pointFormatHasGpsTime = (pointDataFormat != 0) && (pointDataFormat != 2);
-            UInt64 pointIndex = 0;
-            while (reader.TryReadPoint())
+            for (UInt64 pointIndex = 0; pointIndex < numberOfPointRecords; ++pointIndex)
             {
+                reader.ReadPoint();
                 Assert.IsTrue(reader.Point.ClassificationAndFlags < 2);
                 Assert.IsTrue(reader.Point.EdgeOfFlightLine == 0);
                 Assert.IsTrue(reader.Point.ExtendedClassification == 0);
@@ -57,7 +57,7 @@ namespace LasZip.UnitTests
                 Assert.IsTrue(reader.Point.UserData == 0);
                 Assert.IsTrue(reader.Point.Wavepacket.Length == 29);
 
-                Assert.IsTrue(reader.GetPointCoordinates(coordinates) == 0);
+                reader.GetPointCoordinates(coordinates);
                 Assert.IsTrue((reader.Header.MinX <= coordinates[0]) && (coordinates[0] <= reader.Header.MaxX));
                 Assert.IsTrue((reader.Header.MinY <= coordinates[1]) && (coordinates[1] <= reader.Header.MaxY));
                 Assert.IsTrue((reader.Header.MinZ <= coordinates[2]) && (coordinates[2] <= reader.Header.MaxZ));
@@ -67,14 +67,8 @@ namespace LasZip.UnitTests
                 pointCloud.X[pointIndex] = reader.Point.X;
                 pointCloud.Y[pointIndex] = reader.Point.Y;
                 pointCloud.Z[pointIndex] = reader.Point.Z;
-                ++pointIndex;
-                if (isCompressedFile && (pointIndex == numberOfPointRecords))
-                {
-                    break; // work around .laz file read bug
-                }
             }
 
-            Assert.IsTrue(pointIndex == numberOfPointRecords);
             reader.GetPointIndex(out long readerPointIndex);
             Assert.IsTrue(readerPointIndex == reader.Header.NumberOfPointRecords);
             Assert.IsTrue(reader.GetLastWarning() == null);

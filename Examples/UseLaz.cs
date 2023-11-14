@@ -51,7 +51,7 @@ namespace LasZip.Examples
 			for (int pointIndex = 0; pointIndex < numberOfPoints; pointIndex++)
 			{
 				// Read the point
-				lazReader.TryReadPoint();
+				lazReader.ReadPoint();
 				
 				// Get precision coordinates
 				lazReader.GetPointCoordinates(coordArray);
@@ -104,7 +104,7 @@ namespace LasZip.Examples
 				coordArray[2] = point.Z;
 
 				// Set the coordinates in the lazWriter object
-				lazWriter.SetCoordinates(coordArray);
+				lazWriter.SetPointCoordinates(coordArray);
 
 				// Set the classification to ground
 				lazWriter.Point.ClassificationAndFlags = 2;

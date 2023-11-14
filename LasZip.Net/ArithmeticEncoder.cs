@@ -13,24 +13,23 @@ namespace LasZip
         private readonly int endBuffer;
         private int outByte;
         private int endByte;
-        private UInt32 intervalBase;
+        private UInt32 intervalBase; // named base in C+ but base is a keyword in C#
         private UInt32 length;
 
         public ArithmeticEncoder()
         {
-            outBuffer = new byte[2 * EncodeDecode.BufferSize];
-            endBuffer = 2 * EncodeDecode.BufferSize;
+            this.outBuffer = new byte[2 * EncodeDecode.BufferSize];
+            this.endBuffer = 2 * EncodeDecode.BufferSize;
         }
 
         // Manage encoding
-        public bool Init(Stream outstream)
+        public bool Init(Stream outStream)
         {
-            if (outstream == null) return false;
-            this.outStream = outstream;
-            intervalBase = 0;
-            length = EncodeDecode.MaxLength;
-            outByte = 0;
-            endByte = endBuffer;
+            this.outStream = outStream;
+            this.intervalBase = 0;
+            this.length = EncodeDecode.MaxLength;
+            this.outByte = 0;
+            this.endByte = this.endBuffer;
             return true;
         }
 
@@ -41,39 +40,38 @@ namespace LasZip
                 throw new InvalidOperationException();
             }
 
-            UInt32 init_interval_base = intervalBase; // done encoding: set final data bytes
-            bool another_byte = true;
-
+            UInt32 initIntervalBase = intervalBase; // done encoding: set final data bytes
+            bool anotherByte = true;
             if (length > 2 * EncodeDecode.MinLength)
             {
-                intervalBase += EncodeDecode.MinLength; // base offset
-                length = EncodeDecode.MinLength >> 1; // set new length for 1 more byte
+                this.intervalBase += EncodeDecode.MinLength; // base offset
+                this.length = EncodeDecode.MinLength >> 1; // set new length for 1 more byte
             }
             else
             {
-                intervalBase += EncodeDecode.MinLength >> 1; // interval base offset
-                length = EncodeDecode.MinLength >> 9; // set new length for 2 more bytes
-                another_byte = false;
+                this.intervalBase += EncodeDecode.MinLength >> 1; // interval base offset
+                this.length = EncodeDecode.MinLength >> 9; // set new length for 2 more bytes
+                anotherByte = false;
             }
 
-            if (init_interval_base > intervalBase)
+            if (initIntervalBase > intervalBase)
             {
                 this.PropagateCarry(); // overflow = carry
             }
             this.RenormEncInterval(); // renormalization = output last bytes
 
-            if (endByte != endBuffer)
+            if (this.endByte != this.endBuffer)
             {
-                Debug.Assert(outByte < EncodeDecode.BufferSize);
-                outStream.Write(outBuffer, EncodeDecode.BufferSize, EncodeDecode.BufferSize);
+                Debug.Assert(this.outByte < EncodeDecode.BufferSize);
+                outStream.Write(this.outBuffer, EncodeDecode.BufferSize, EncodeDecode.BufferSize);
             }
 
-            if (outByte != 0) outStream.Write(outBuffer, 0, outByte);
+            if (this.outByte != 0) { outStream.Write(this.outBuffer, 0, this.outByte); }
 
             // write two or three zero bytes to be in sync with the decoder's byte reads
-            outStream.WriteByte(0);
-            outStream.WriteByte(0);
-            if (another_byte) { outStream.WriteByte(0); }
+            this.outStream.WriteByte(0);
+            this.outStream.WriteByte(0);
+            if (anotherByte) { this.outStream.WriteByte(0); }
 
             outStream = null;
         }
@@ -84,9 +82,9 @@ namespace LasZip
             return new ArithmeticBitModel();
         }
 
-        public static void InitBitModel(ArithmeticBitModel m)
+        public static void InitBitModel(ArithmeticBitModel model)
         {
-            m.Init();
+            model.Init();
         }
 
         // Manage an entropy model for n symbols (table optional)
@@ -95,33 +93,33 @@ namespace LasZip
             return new ArithmeticModel(n, true);
         }
 
-        public static void InitSymbolModel(ArithmeticModel m, UInt32[]? table = null)
+        public static void InitSymbolModel(ArithmeticModel model, UInt32[]? table = null)
         {
-            m.Init(table);
+            model.Init(table);
         }
 
         // Encode a bit with modelling
-        public void EncodeBit(ArithmeticBitModel m, UInt32 bit)
+        public void EncodeBit(ArithmeticBitModel model, UInt32 bit)
         {
-            Debug.Assert(m != null && (bit <= 1));
+            Debug.Assert(model != null && (bit <= 1));
 
-            UInt32 x = m.Bit0Prob * (length >> BinaryModels.LengthShift); // product l x p0
-                                                                // update interval
+            UInt32 x = model.Bit0Prob * (length >> BinaryModels.LengthShift); // product l x p0
+            // update interval
             if (bit == 0)
             {
                 length = x;
-                ++m.Bit0Count;
+                ++model.Bit0Count;
             }
             else
             {
                 UInt32 init_interval_base = intervalBase;
                 intervalBase += x;
                 length -= x;
-                if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
+                if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
             }
 
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
-            if (--m.BitsUntilUpdate == 0) m.Update(); // periodic model update
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
+            if (--model.BitsUntilUpdate == 0) { model.Update(); } // periodic model update
         }
 
         // Encode a symbol with modelling
@@ -149,11 +147,11 @@ namespace LasZip
                 length = model.Distribution[sym + 1] * length - x;
             }
 
-            if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
+            if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
 
             ++model.SymbolCount[sym];
-            if (--model.SymbolsUntilUpdate == 0) model.Update(); // periodic model update
+            if (--model.SymbolsUntilUpdate == 0) { model.Update(); } // periodic model update
         }
 
         // Encode a bit without modelling
@@ -164,8 +162,8 @@ namespace LasZip
             UInt32 init_interval_base = intervalBase;
             intervalBase += bit * (length >>= 1); // new interval base and length
 
-            if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
+            if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
         }
 
         // Encode bits without modelling
@@ -183,8 +181,8 @@ namespace LasZip
             UInt32 init_interval_base = intervalBase;
             intervalBase += sym * (length >>= bits); // new interval base and length
 
-            if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
+            if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
         }
 
         // Encode an unsigned char without modelling
@@ -193,8 +191,8 @@ namespace LasZip
             UInt32 init_interval_base = intervalBase;
             intervalBase += (UInt32)(sym) * (length >>= 8); // new interval base and length
 
-            if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
+            if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
         }
 
         // Encode an unsigned short without modelling
@@ -203,8 +201,8 @@ namespace LasZip
             UInt32 init_interval_base = intervalBase;
             intervalBase += (UInt32)(sym) * (length >>= 16); // new interval base and length
 
-            if (init_interval_base > intervalBase) PropagateCarry(); // overflow = carry
-            if (length < EncodeDecode.MinLength) RenormEncInterval(); // renormalization
+            if (init_interval_base > intervalBase) { this.PropagateCarry(); } // overflow = carry
+            if (length < EncodeDecode.MinLength) { this.RenormEncInterval(); } // renormalization
         }
 
         // Encode an unsigned int without modelling

@@ -29,8 +29,9 @@ namespace LasZip.Examples
             List<PointBatchXyz> points = new(1);
             int pointsInBatch = 0;
             UInt64 pointsRead = 0;
-            while (lazReader.TryReadPoint())
+            for (UInt64 point = 0; point < totalNumberOfPoints; ++point)
             {
+                lazReader.ReadPoint();
                 if (pointsInBatch >= currentPointBatch.Capacity)
                 {
                     points.Add(currentPointBatch);

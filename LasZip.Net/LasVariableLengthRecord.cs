@@ -6,7 +6,7 @@ namespace LasZip
     public class LasVariableLengthRecord
     {
         public UInt16 Reserved { get; set; }
-        public byte[] UserID { get; set; } = new byte[16];
+        public byte[] UserID { get; set; }
         public UInt16 RecordID { get; set; }
         public UInt16 RecordLengthAfterHeader { get; set; }
         public byte[] Description { get; set; }

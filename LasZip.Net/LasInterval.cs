@@ -1,4 +1,5 @@
 ﻿// lasinterval.{hpp, cpp}
+using LasZip.Extensions;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -11,14 +12,14 @@ namespace LasZip
     internal class LasInterval
     {
         private readonly SortedDictionary<int, LasIntervalStartCell> cells;
-        private SortedSet<LasIntervalStartCell>? cells_to_merge;
+        private SortedSet<LasIntervalStartCell>? cellsToMerge;
         private readonly UInt32 threshold;
-        private UInt32 number_intervals; // TODO: make public and remove get_number_intervals()
-        private int last_index;
-        private LasIntervalStartCell? last_cell;
-        private LasIntervalCell? current_cell;
-        private LasIntervalStartCell? merged_cells;
-        private bool merged_cells_temporary;
+        private UInt32 totalNumberOfIntervals; // TODO: make public and remove GetTotalNumberOfIntervals()
+        private int lastIndex;
+        private LasIntervalStartCell? lastCell;
+        private LasIntervalCell? currentCell;
+        private LasIntervalStartCell? mergedCells;
+        private bool mergedCellsTemporary;
 
         public int Index { get; set; }
         public UInt32 Start { get; set; }
@@ -29,33 +30,33 @@ namespace LasZip
         public LasInterval(UInt32 threshold = 1000)
         {
             this.cells = new();
-            this.cells_to_merge = null;
+            this.cellsToMerge = null;
             this.threshold = threshold;
-            this.number_intervals = 0;
-            this.last_index = Int32.MinValue;
-            this.last_cell = null;
-            this.current_cell = null;
-            this.merged_cells = null;
-            this.merged_cells_temporary = false;
+            this.totalNumberOfIntervals = 0;
+            this.lastIndex = Int32.MinValue;
+            this.lastCell = null;
+            this.currentCell = null;
+            this.mergedCells = null;
+            this.mergedCellsTemporary = false;
         }
 
-        public bool Add(UInt32 p_index, int c_index)
+        public bool Add(UInt32 pIndex, int cIndex)
         {
-            if (this.last_cell == null || this.last_index != c_index)
+            if (this.lastCell == null || this.lastIndex != cIndex)
             {
-                this.last_index = c_index;
-                if (this.cells.TryGetValue(c_index, out LasIntervalStartCell? interval) == false)
+                this.lastIndex = cIndex;
+                if (this.cells.TryGetValue(cIndex, out LasIntervalStartCell? interval) == false)
                 {
-                    last_cell = new(p_index);
-                    this.cells.Add(c_index, last_cell);
-                    number_intervals++;
+                    lastCell = new(pIndex);
+                    this.cells.Add(cIndex, lastCell);
+                    totalNumberOfIntervals++;
                     return true;
                 }
-                last_cell = interval;
+                lastCell = interval;
             }
-            if (last_cell.Add(p_index, threshold))
+            if (lastCell.Add(pIndex, threshold))
             {
-                number_intervals++;
+                totalNumberOfIntervals++;
                 return true;
             }
             return false;
@@ -70,54 +71,54 @@ namespace LasZip
         // get total number of intervals
         public UInt32 GetTotalNumberOfIntervals()
         {
-            return number_intervals;
+            return totalNumberOfIntervals;
         }
 
         // merge cells (and their intervals) into one cell
-        public bool MergeCells(UInt32 num_indices, UInt32[] indices, int new_index)
+        public bool MergeCells(UInt32 numIndices, UInt32[] indices, int newIndex)
         {
-            if (num_indices == 1)
+            if (numIndices == 1)
             {
                 if (this.cells.TryGetValue((int)indices[0], out LasIntervalStartCell? interval) == false)
                 {
                     return false;
                 }
-                this.cells.Add(new_index, interval);
+                this.cells.Add(newIndex, interval);
                 this.cells.Remove((int)indices[0]);
             }
             else
             {
-                if (cells_to_merge != null) { this.cells_to_merge.Clear(); }
-                for (int i = 0; i < num_indices; i++)
+                if (cellsToMerge != null) { this.cellsToMerge.Clear(); }
+                for (int i = 0; i < numIndices; i++)
                 {
                     AddCellToMergeCellSet((int)indices[i], true);
                 }
                 if (!Merge()) { return false; }
-                this.cells.Add(new_index, merged_cells);
-                this.merged_cells = null;
+                this.cells.Add(newIndex, mergedCells);
+                this.mergedCells = null;
             }
             return true;
         }
 
         // merge adjacent intervals with small gaps in cells to reduce total interval number to maximum
-        public void MergeIntervals(UInt32 maximum_intervals)
+        public void MergeIntervals(UInt32 maximumIntervals)
         {
             // each cell has minimum one interval
-            if (maximum_intervals < GetTotalNumberOfCells())
+            if (maximumIntervals < GetTotalNumberOfCells())
             {
-                maximum_intervals = 0;
+                maximumIntervals = 0;
             }
             else
             {
-                maximum_intervals -= GetTotalNumberOfCells();
+                maximumIntervals -= this.GetTotalNumberOfCells();
             }
 
             // order intervals by smallest gap
 
             SortedDictionary<UInt32, LasIntervalCell> map = new();
-            foreach (KeyValuePair<int, LasIntervalStartCell> hash_element in this.cells)
+            foreach (KeyValuePair<int, LasIntervalStartCell> hashElement in this.cells)
             {
-                LasIntervalCell cell = hash_element.Value;
+                LasIntervalCell cell = hashElement.Value;
                 while (cell.Next != null)
                 {
                     UInt32 diff = cell.Next.Start - cell.End - 1;
@@ -127,60 +128,68 @@ namespace LasZip
             }
 
             // maybe nothing to do
-            if (map.Count <= maximum_intervals)
+            if (map.Count <= maximumIntervals)
             {
-                // if (verbose) fprintf(stderr, "next largest interval gap is %u\n", diff);
+                //if (map.size() == 0)
+                //{
+                //    fprintf(stderr, "maximumIntervals: %u number of interval gaps: 0 \n", maximumIntervals);
+                //}
+                //else
+                //{
+                //    diff = (*(map.begin())).first;
+                //    fprintf(stderr, "maximumIntervals: %u number of interval gaps: %u next largest interval gap %u\n", maximumIntervals, (U32)map.size(), diff);
+                //}
                 return;
             }
 
             UInt32 size = (UInt32)map.Count;
-            while (size > maximum_intervals)
+            while (size > maximumIntervals)
             {
-                KeyValuePair<UInt32, LasIntervalCell> map_element = map.First();
-                LasIntervalCell cell = map_element.Value;
-                map.Remove(map_element.Key);
+                KeyValuePair<UInt32, LasIntervalCell> mapElement = map.First();
+                LasIntervalCell cell = mapElement.Value;
+                map.Remove(mapElement.Key);
                 if ((cell.Start == 1) && (cell.End == 0)) // the (start == 1 && end == 0) signals that the cell is to be deleted
                 {
-                    number_intervals--;
+                    totalNumberOfIntervals--;
                 }
                 else
                 {
-                    LasIntervalCell? delete_cell = cell.Next;
-                    cell.End = delete_cell.End;
-                    cell.Next = delete_cell.Next;
+                    LasIntervalCell? deleteCell = cell.Next;
+                    cell.End = deleteCell.End;
+                    cell.Next = deleteCell.Next;
                     if (cell.Next != null)
                     {
                         map.Add(cell.Next.Start - cell.End - 1, cell);
-                        delete_cell.Start = 1; 
-                        delete_cell.End = 0; // the (start == 1 && end == 0) signals that the cell is to be deleted
+                        deleteCell.Start = 1; 
+                        deleteCell.End = 0; // the (start == 1 && end == 0) signals that the cell is to be deleted
                     }
                     else
                     {
-                        number_intervals--;
+                        totalNumberOfIntervals--;
                     }
                     size--;
                 }
             }
 
-            foreach (KeyValuePair<UInt32, LasIntervalCell> map_element in map)
+            foreach (KeyValuePair<UInt32, LasIntervalCell> mapElement in map)
             {
-                LasIntervalCell cell = map_element.Value;
+                LasIntervalCell cell = mapElement.Value;
                 if ((cell.Start == 1) && (cell.End == 0)) // the (start == 1 && end == 0) signals that the cell is to be deleted
                 {
-                    number_intervals--;
+                    totalNumberOfIntervals--;
                 }
             }
-            // fprintf(stderr, "largest interval gap increased to %u\n", diff);
+            // if (verbose) fprintf(stderr, "largest interval gap increased to %u\n", diff);
 
             // update totals
-            foreach (KeyValuePair<int, LasIntervalStartCell> hash_element in this.cells)
+            foreach (KeyValuePair<int, LasIntervalStartCell> hashElement in this.cells)
             {
-                LasIntervalStartCell start_cell = hash_element.Value;
-                start_cell.Total = 0;
-                LasIntervalCell? cell = start_cell;
+                LasIntervalStartCell startCell = hashElement.Value;
+                startCell.Total = 0;
+                LasIntervalCell? cell = startCell;
                 while (cell != null)
                 {
-                    start_cell.Total += (cell.End - cell.Start + 1);
+                    startCell.Total += (cell.End - cell.Start + 1);
                     cell = cell.Next;
                 }
             }
@@ -188,15 +197,15 @@ namespace LasZip
 
         public void GetCells()
         {
-            last_index = Int32.MinValue;
-            current_cell = null;
+            lastIndex = Int32.MinValue;
+            currentCell = null;
         }
 
         public bool HasCells()
         {
             int index;
             LasIntervalStartCell? cell;
-            if (last_index == Int32.MinValue)
+            if (lastIndex == Int32.MinValue)
             {
                 SortedDictionary<int, LasIntervalStartCell>.Enumerator enumerator = this.cells.GetEnumerator();
                 enumerator.MoveNext();
@@ -205,63 +214,63 @@ namespace LasZip
             }
             else
             {
-                if (this.cells.TryGetValue(last_index, out cell) == false)
+                if (this.cells.TryGetValue(lastIndex, out cell) == false)
                 {
-                    last_index = Int32.MinValue;
-                    current_cell = null;
+                    lastIndex = Int32.MinValue;
+                    currentCell = null;
                     return false;
                 }
 
-                index = last_index;
+                index = lastIndex;
             }
 
-            this.last_index = index;
+            this.lastIndex = index;
             this.Index = index;
             this.Full = cell.Full;
             this.Total = cell.Total;
-            this.current_cell = cell;
+            this.currentCell = cell;
             return true;
         }
 
-        public bool GetCell(int c_index)
+        public bool GetCell(int cIndex)
         {
-            if (this.cells.TryGetValue(c_index, out LasIntervalStartCell? interval) == false)
+            if (this.cells.TryGetValue(cIndex, out LasIntervalStartCell? interval) == false)
             {
-                current_cell = null;
+                currentCell = null;
                 return false;
             }
-            this.Index = c_index;
+            this.Index = cIndex;
             this.Full = interval.Full;
             this.Total = interval.Total;
-            this.current_cell = interval;
+            this.currentCell = interval;
             return true;
         }
 
         public bool AddCurrentCellToMergeCellSet()
         {
-            if (current_cell == null)
+            if (currentCell == null)
             {
                 return false;
             }
-            cells_to_merge ??= new();
-            this.cells_to_merge.Add((LasIntervalStartCell)this.current_cell);
+            cellsToMerge ??= new();
+            this.cellsToMerge.Add((LasIntervalStartCell)this.currentCell);
             return true;
         }
 
-        public bool AddCellToMergeCellSet(int c_index, bool erase)
+        public bool AddCellToMergeCellSet(int cIndex, bool erase)
         {
-            if (this.cells.TryGetValue(c_index, out LasIntervalStartCell? interval) == false)
+            if (this.cells.TryGetValue(cIndex, out LasIntervalStartCell? interval) == false)
             {
                 return false;
             }
-            if (cells_to_merge == null)
+            if (cellsToMerge == null)
             {
-                cells_to_merge = new();
+                cellsToMerge = new();
             }
-            this.cells_to_merge.Add(interval);
+            this.cellsToMerge.Add(interval);
             if (erase)
             {
-                this.cells.Remove(c_index);
+                this.cells.Remove(cIndex);
             }
             return true;
         }
@@ -269,90 +278,90 @@ namespace LasZip
         public bool Merge()
         {
             // maybe delete temporary merge cells from the previous merge
-            this.merged_cells = null;
+            this.mergedCells = null;
 
             // are there cells to merge
-            if ((cells_to_merge == null) || (this.cells_to_merge.Count == 0)) { return false; }
+            if ((cellsToMerge == null) || (this.cellsToMerge.Count == 0)) { return false; }
 
             // is there just one cell
-            if (this.cells_to_merge.Count == 1)
+            if (this.cellsToMerge.Count == 1)
             {
-                merged_cells_temporary = false;
+                mergedCellsTemporary = false;
                 // simply use this cell as the merge cell
-                merged_cells = this.cells_to_merge.First();
+                mergedCells = this.cellsToMerge.First();
             }
             else
             {
-                merged_cells_temporary = true;
-                merged_cells = new();
+                mergedCellsTemporary = true;
+                mergedCells = new();
                 // iterate over all cells and add their intervals to map
                 SortedDictionary<UInt32, LasIntervalStartCell> map = new();
-                foreach (LasIntervalStartCell interval in this.cells_to_merge)
+                foreach (LasIntervalStartCell interval in this.cellsToMerge)
                 {
-                    merged_cells.Full += interval.Full;
+                    mergedCells.Full += interval.Full;
                     map.Add(interval.Start, interval);
                 }
 
-                // initialize merged_cells with first interval
+                // initialize mergedCells with first interval
                 SortedDictionary<UInt32, LasIntervalStartCell>.Enumerator mapEnumerator = map.GetEnumerator();
                 mapEnumerator.MoveNext();
-                KeyValuePair<UInt32, LasIntervalStartCell> map_element = mapEnumerator.Current;
-                LasIntervalStartCell cell = map_element.Value;
+                KeyValuePair<UInt32, LasIntervalStartCell> mapElement = mapEnumerator.Current;
+                LasIntervalStartCell cell = mapElement.Value;
 
-                merged_cells.Start = cell.Start;
-                merged_cells.End = cell.End;
-                merged_cells.Total = cell.End - cell.Start + 1;
+                mergedCells.Start = cell.Start;
+                mergedCells.End = cell.End;
+                mergedCells.Total = cell.End - cell.Start + 1;
                 // if (erase) { delete cell; }
 
                 // merge intervals
-                LasIntervalCell last_cell = merged_cells;
+                LasIntervalCell lastCell = mergedCells;
                 UInt32 diff;
                 while (mapEnumerator.MoveNext())
                 {
-                    map_element = mapEnumerator.Current;
-                    cell = map_element.Value;
-                    // map.erase(map_element);
-                    diff = cell.Start - last_cell.End;
+                    mapElement = mapEnumerator.Current;
+                    cell = mapElement.Value;
+                    // map.erase(mapElement);
+                    diff = cell.Start - lastCell.End;
                     if (diff > (int)threshold)
                     {
-                        last_cell.Next = new(cell);
-                        last_cell = last_cell.Next;
-                        merged_cells.Total += (cell.End - cell.Start + 1);
+                        lastCell.Next = new(cell);
+                        lastCell = lastCell.Next;
+                        mergedCells.Total += (cell.End - cell.Start + 1);
                     }
                     else
                     {
-                        diff = cell.End - last_cell.End;
+                        diff = cell.End - lastCell.End;
                         if (diff > 0)
                         {
-                            last_cell.End = cell.End;
-                            merged_cells.Total += diff;
+                            lastCell.End = cell.End;
+                            mergedCells.Total += diff;
                         }
-                        number_intervals--;
+                        totalNumberOfIntervals--;
                     }
                     // if (erase) { delete cell; }
                 }
             }
-            current_cell = merged_cells;
-            Full = merged_cells.Full;
-            Total = merged_cells.Total;
+            currentCell = mergedCells;
+            Full = mergedCells.Full;
+            Total = mergedCells.Total;
             return true;
         }
 
         public void ClearMergeCellSet()
         {
-            if (cells_to_merge != null)
+            if (cellsToMerge != null)
             {
-                this.cells_to_merge.Clear();
+                this.cellsToMerge.Clear();
             }
         }
 
         public bool GetMergedCell()
         {
-            if (merged_cells != null)
+            if (mergedCells != null)
             {
-                Full = merged_cells.Full;
-                Total = merged_cells.Total;
-                current_cell = merged_cells;
+                Full = mergedCells.Full;
+                Total = mergedCells.Total;
+                currentCell = mergedCells;
                 return true;
             }
             return false;
@@ -360,136 +369,110 @@ namespace LasZip
 
         public bool HasIntervals()
         {
-            if (current_cell != null)
+            if (currentCell != null)
             {
-                Start = current_cell.Start;
-                End = current_cell.End;
-                current_cell = current_cell.Next;
+                Start = currentCell.Start;
+                End = currentCell.End;
+                currentCell = currentCell.Next;
                 return true;
             }
             return false;
         }
 
-        public bool Read(ByteStreamIn stream)
+        public bool Read(Stream stream)
         {
             Span<byte> readBuffer = stackalloc byte[4];
-            stream.GetBytes(readBuffer, 4);
+            stream.ReadExactly(readBuffer);
             string signature = Encoding.UTF8.GetString(readBuffer);
             if (String.Equals(signature, "LASV", StringComparison.Ordinal) == false)
             {
                 throw new IOException("wrong signature: " + signature + " instead of 'LASV'.");
             }
 
-            stream.Get32bitsLE(readBuffer); // version
+            stream.ReadExactly(readBuffer); // version
 
             // read number of cells
-            stream.Get32bitsLE(readBuffer);
-            UInt32 number_cells = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+            UInt32 numberCells = stream.ReadUInt32LittleEndian();
 
             // loop over all cells
-            while (number_cells != 0)
+            while (numberCells != 0)
             {
                 // read index of cell
-                stream.Get32bitsLE(readBuffer);
-                int cell_index = BinaryPrimitives.ReadInt32LittleEndian(readBuffer);
+                int cellIndex = stream.ReadInt32LittleEndian();
 
                 // create cell and insert into hash
-                LasIntervalStartCell start_cell = new();
-                this.cells.Add(cell_index, start_cell);
-                LasIntervalCell cell = start_cell;
+                LasIntervalStartCell startCell = new();
+                this.cells.Add(cellIndex, startCell);
+                LasIntervalCell cell = startCell;
                 // read number of intervals in cell
-                stream.Get32bitsLE(readBuffer);
-                UInt32 number_intervals = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+                UInt32 numberIntervals = stream.ReadUInt32LittleEndian();
 
                 // read number of points in cell
-                stream.Get32bitsLE(readBuffer);
-                UInt32 number_points = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+                UInt32 numberPoints = stream.ReadUInt32LittleEndian();
 
-                start_cell.Full = number_points;
-                start_cell.Total = 0;
-                while (number_intervals != 0)
+                startCell.Full = numberPoints;
+                startCell.Total = 0;
+                while (numberIntervals != 0)
                 {
                     // read start of interval
-                    stream.Get32bitsLE(readBuffer);
-                    cell.Start = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+                    cell.Start = stream.ReadUInt32LittleEndian();
 
                     // read end of interval
-                    stream.Get32bitsLE(readBuffer);
-                    cell.End = BinaryPrimitives.ReadUInt32LittleEndian(readBuffer);
+                    cell.End = stream.ReadUInt32LittleEndian();
 
-                    start_cell.Total += (cell.End - cell.Start + 1);
-                    number_intervals--;
-                    if (number_intervals != 0)
+                    startCell.Total += (cell.End - cell.Start + 1);
+                    numberIntervals--;
+                    if (numberIntervals != 0)
                     {
                         cell.Next = new LasIntervalCell();
                         cell = cell.Next;
                     }
                 }
-                number_cells--;
+                numberCells--;
             }
 
             return true;
         }
 
-        public bool Write(ByteStreamOut stream)
+        public bool Write(Stream stream)
         {
-            if (!stream.PutBytes(Encoding.UTF8.GetBytes("LASV"), 4))
-            {
-                throw new IOException("writing signature\n");
-            }
+            stream.Write(Encoding.UTF8.GetBytes("LASV"));
             Span<byte> version = stackalloc byte[] { 0, 0, 0, 0 };
-            if (!stream.Put32bitsLE(version))
-            {
-                throw new IOException("writing version");
-            }
+            stream.Write(version);
+
             // write number of cells
-            if (!stream.Put32bitsLE(this.cells.Count))
-            {
-                throw new IOException("writing number of cells " +  this.cells.Count);
-            }
+            stream.WriteLittleEndian(this.cells.Count);
+
             // loop over all cells
-            foreach (KeyValuePair<int, LasIntervalStartCell> hash_element in this.cells)
+            foreach (KeyValuePair<int, LasIntervalStartCell> hashElement in this.cells)
             {
                 // count number of intervals and points in cell
-                UInt32 number_intervals = 0;
-                UInt32 number_points = hash_element.Value.Full;
-                LasIntervalCell? cell = hash_element.Value;
+                UInt32 numberIntervals = 0;
+                UInt32 numberPoints = hashElement.Value.Full;
+                LasIntervalCell? cell = hashElement.Value;
                 while (cell != null)
                 {
-                    number_intervals++;
+                    numberIntervals++;
                     cell = cell.Next;
                 }
 
                 // write index of cell
-                int cell_index = hash_element.Key;
-                if (!stream.Put32bitsLE(cell_index))
-                {
-                    throw new IOException("writing cell index " + cell_index);
-                }
+                int cellIndex = hashElement.Key;
+                stream.WriteLittleEndian(cellIndex);
                 // write number of intervals in cell
-                if (!stream.Put32bitsLE(number_intervals))
-                {
-                    throw new IOException("writing number of intervals %d in cell " + number_intervals);
-                }
+                stream.WriteLittleEndian(numberIntervals);
                 // write number of points in cell
-                if (!stream.Put32bitsLE(number_points))
-                {
-                    throw new IOException("writing number of points %d in cell " + number_points);
-                }
+                stream.WriteLittleEndian(numberPoints);
+                
                 // write intervals
-                cell = hash_element.Value;
+                cell = hashElement.Value;
                 while (cell != null)
                 {
                     // write start of interval
-                    if (!stream.Put32bitsLE(cell.Start))
-                    {
-                        throw new IOException("writing start " + cell.Start + " of interval");
-                    }
+                    stream.WriteLittleEndian(cell.Start);
                     // write end of interval
-                    if (!stream.Put32bitsLE(cell.End))
-                    {
-                        throw new IOException("writing end " + cell.End + " of interval");
-                    }
+                    stream.WriteLittleEndian(cell.End);
+                    
                     cell = cell.Next;
                 }
             }

@@ -13,7 +13,10 @@ namespace LasZip
         Gpstime11, 
         Rgb12, 
         Wavepacket13,
-        Point14, 
-        RgbNir14 
+        Point14,
+        Rgb14,
+        RgbNir14,
+        Wavepacket14,
+        Byte14
     }
 }

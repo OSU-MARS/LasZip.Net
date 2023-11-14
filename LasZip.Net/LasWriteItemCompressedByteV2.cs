@@ -6,19 +6,18 @@ namespace LasZip
 {
     class LasWriteItemCompressedByteV2 : LasWriteItemCompressed
     {
-        private readonly ArithmeticEncoder enc;
-        private readonly UInt32 number;
+        private readonly ArithmeticEncoder encoder;
+        private readonly int number;
         private readonly byte[] lastItem;
 
         private readonly ArithmeticModel[] byteModel;
 
-        public LasWriteItemCompressedByteV2(ArithmeticEncoder enc, UInt32 number)
+        public LasWriteItemCompressedByteV2(ArithmeticEncoder encoder, UInt32 number)
         {
-            // set encoder
-            Debug.Assert(enc != null);
-            this.enc = enc;
             Debug.Assert(number > 0);
-            this.number = number;
+
+            this.encoder = encoder;
+            this.number = (int)number;
 
             // create models and integer compressors
             byteModel = new ArithmeticModel[number];
@@ -31,7 +30,7 @@ namespace LasZip
             lastItem = new byte[number];
         }
 
-        public override bool Init(LasPoint item)
+        public override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
             // init state
 
@@ -42,20 +41,20 @@ namespace LasZip
             }
 
             // init last item
-            Buffer.BlockCopy(item.ExtraBytes, 0, lastItem, 0, (int)number);
+            item[..this.number].CopyTo(this.lastItem);
 
             return true;
         }
 
-        public override bool Write(LasPoint item)
+        public override bool Write(ReadOnlySpan<byte> item, UInt32 context)
         {
-            for (UInt32 i = 0; i < number; i++)
+            for (int i = 0; i < number; i++)
             {
-                int diff = item.ExtraBytes[i] - lastItem[i];
-                enc.EncodeSymbol(byteModel[i], (byte)MyDefs.FoldUint8(diff));
+                int diff = item[i] - this.lastItem[i];
+                this.encoder.EncodeSymbol(this.byteModel[i], (byte)MyDefs.FoldUInt8(diff));
             }
 
-            Buffer.BlockCopy(item.ExtraBytes, 0, lastItem, 0, (int)number);
+            item[..this.number].CopyTo(this.lastItem);
             return true;
         }
     }

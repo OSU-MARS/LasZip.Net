@@ -14,11 +14,6 @@ namespace LasZip
 
         public bool Init(Stream outStream)
         {
-            if (outStream == null)
-            {
-                return false;
-            }
-
             this.OutStream = outStream;
             return true;
         }

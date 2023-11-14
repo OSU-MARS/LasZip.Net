@@ -1,5 +1,7 @@
 ﻿// lasreadpoint.{hpp, cpp}
+using LasZip.Extensions;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 
@@ -12,7 +14,8 @@ namespace LasZip
         private LasReadItem[]? readers;
         private LasReadItem[]? readersRaw;
         private LasReadItem[]? readersCompressed;
-        private ArithmeticDecoder? dec;
+        private ArithmeticDecoder? decoder;
+        private bool layeredLas14compression;
 
         // used for chunking
         private UInt32 chunkSize;
@@ -23,32 +26,38 @@ namespace LasZip
         private List<Int64>? chunkStarts;
         private UInt32[]? chunkTotals;
 
+        // used for selective decompression (LAS 1.4 point types only)
+        private readonly LasZipDecompressSelective decompressSelective;
+
         // used for seeking
         private Int64 pointStart;
         private UInt32 pointSize;
-        private readonly LasPoint seekPoint = new();
+        private byte[] seekPoint;
 
-        public LasReadPoint()
+        public LasReadPoint(LasZipDecompressSelective decompressSelective = LasZipDecompressSelective.All)
         {
-            pointSize = 0;
-            inStream = null;
-            numReaders = 0;
-            readers = null;
-            readersRaw = null;
-            readersCompressed = null;
-            dec = null;
+            this.pointSize = 0;
+            this.inStream = null;
+            this.numReaders = 0;
+            this.readers = null;
+            this.readersRaw = null;
+            this.readersCompressed = null;
+            this.decoder = null;
+            this.layeredLas14compression = false;
 
             // used for chunking
-            chunkSize = UInt32.MaxValue;
-            chunkCount = 0;
-            currentChunk = 0;
-            numberChunks = 0;
-            tabledChunks = 0;
-            chunkTotals = null;
-            chunkStarts = null;
+            this.chunkSize = UInt32.MaxValue;
+            this.chunkCount = 0;
+            this.currentChunk = 0;
+            this.numberChunks = 0;
+            this.tabledChunks = 0;
+            this.chunkTotals = null;
+            this.chunkStarts = null;
+            this.decompressSelective = decompressSelective;
 
             // used for seeking
-            pointStart = 0;
+            this.pointStart = 0;
+            this.seekPoint = Array.Empty<byte>();
         }
 
         // should only be called *once*
@@ -56,19 +65,26 @@ namespace LasZip
         {
             UInt16 numItems = lasZip.NumItems;
             LasItem[]? items = lasZip.Items;
+            if ((numItems == 0) || (items == null))
+            {
+                return false;
+            }
 
             // create entropy decoder (if requested)
-            if (this.dec != null)
-            {
-                dec = null;
-            }
-            if (lasZip != null && lasZip.Compressor != 0)
+            this.decoder = null;
+            if (lasZip.Compressor != 0)
             {
                 switch (lasZip.Coder)
                 {
-                    case LasZip.CoderArithmetic: dec = new ArithmeticDecoder(); break;
-                    default: return false; // entropy decoder not supported
+                    case LasZip.CoderArithmetic: 
+                        this.decoder = new(); 
+                        break;
+                    default: 
+                        return false; // entropy decoder not supported
                 }
+
+                // maybe layered compression for LAS 1.4 
+                this.layeredLas14compression = lasZip.Compressor == LasZip.CompressorLayeredChunked;
             }
 
             // initizalize the readers
@@ -84,21 +100,51 @@ namespace LasZip
             {
                 switch (items[i].Type)
                 {
-                    case LasItemType.Point10: readersRaw[i] = new LasReadItemRawPoint10(); break;
-                    case LasItemType.Gpstime11: readersRaw[i] = new LasReadItemRawGpstime11(); break;
-                    case LasItemType.Rgb12: readersRaw[i] = new LasReadItemRawRgb12(); break;
-                    case LasItemType.Wavepacket13: readersRaw[i] = new LasReadItemRawWavepacket13(); break;
-                    case LasItemType.Byte: readersRaw[i] = new LasReadItemRawByte(items[i].Size); break;
-                    case LasItemType.Point14: readersRaw[i] = new LasReadItemRawPoint14(); break;
-                    case LasItemType.RgbNir14: readersRaw[i] = new LasReadItemRawRgbNir14(); break;
-                    default: return false;
+                    case LasItemType.Point10:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawPoint10LittleEndian() : new LasReadItemRawPoint10BigEndian(); 
+                        break;
+                    case LasItemType.Gpstime11:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawGpstime11BigEndian() : new LasReadItemRawGpstime11BigEndian();
+                        break;
+                    case LasItemType.Rgb12:
+                    case LasItemType.Rgb14:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawRgb12LittleEndian() : new LasReadItemRawRgb12BigEndian();
+                        break;
+                    case LasItemType.Byte:
+                    case LasItemType.Byte14:
+                        readersRaw[i] = new LasReadItemRawByte(items[i].Size); 
+                        break;
+                    case LasItemType.Point14:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawPoint14LittleEndian() : new LasReadItemRawPoint14BigEndian();
+                        break;
+                    case LasItemType.RgbNir14:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawRgbNir14LittleEndian() : new LasReadItemRawRgbNir14BigEndian();
+                        break;
+                    case LasItemType.Wavepacket13:
+                    case LasItemType.Wavepacket14:
+                        readersRaw[i] = BitConverter.IsLittleEndian ? new LasReadItemRawWavepacket13LittleEndian() : new LasReadItemRawWavepacket13BigEndian();
+                        break;
+                    default: 
+                        return false;
                 }
-                pointSize += items[i].Size;
+
+                this.pointSize += items[i].Size;
             }
 
-            if (dec != null)
+            if (this.decoder != null)
             {
-                readersCompressed = new LasReadItem[numReaders];
+                this.readersCompressed = new LasReadItem[numReaders];
+                if (this.layeredLas14compression)
+                {
+                    // because combo LAS 1.0 - 1.4 point struct has padding
+                    this.seekPoint = new byte[2 * this.pointSize];
+                    // because extended_point_type must be set
+                    this.seekPoint[22] = 1;
+                }
+                else
+                {
+                    this.seekPoint = new byte[this.pointSize];
+                }
 
                 // seeks with compressed data need a seek point
                 for (int i = 0; i < numReaders; i++)
@@ -106,39 +152,105 @@ namespace LasZip
                     switch (items[i].Type)
                     {
                         case LasItemType.Point10:
-                            if (items[i].Version == 1) readersCompressed[i] = new LasReadItemCompressedPoint10v1(dec);
-                            else if (items[i].Version == 2) readersCompressed[i] = new LasReadItemCompressedPoint10v2(dec);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                this.readersCompressed[i] = new LasReadItemCompressedPoint10v1(this.decoder);
+                            else if (items[i].Version == 2) 
+                                this.readersCompressed[i] = new LasReadItemCompressedPoint10v2(this.decoder);
+                            else 
+                                return false;
                             break;
                         case LasItemType.Gpstime11:
-                            if (items[i].Version == 1) readersCompressed[i] = new LasReadItemCompressedGpstime11v1(dec);
-                            else if (items[i].Version == 2) readersCompressed[i] = new LasReadItemCompressedGpstime11v2(dec);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                this.readersCompressed[i] = new LasReadItemCompressedGpstime11v1(this.decoder);
+                            else if (items[i].Version == 2) 
+                                this.readersCompressed[i] = new LasReadItemCompressedGpstime11v2(this.decoder);
+                            else 
+                                return false;
                             break;
                         case LasItemType.Rgb12:
-                            if (items[i].Version == 1) readersCompressed[i] = new LasReadItemCompressedRgb12v1(dec);
-                            else if (items[i].Version == 2) readersCompressed[i] = new LasReadItemCompressedRgb12v2(dec);
-                            else return false;
-                            break;
-                        case LasItemType.Wavepacket13:
-                            if (items[i].Version == 1) readersCompressed[i] = new LASreadItemCompressedWavepacket13v1(dec);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                this.readersCompressed[i] = new LasReadItemCompressedRgb12v1(this.decoder);
+                            else if (items[i].Version == 2) 
+                                this.readersCompressed[i] = new LasReadItemCompressedRgb12v2(this.decoder);
+                            else 
+                                return false;
                             break;
                         case LasItemType.Byte:
-                            seekPoint.ExtraBytes = new byte[items[i].Size];
-                            seekPoint.NumExtraBytes = items[i].Size;
-                            if (items[i].Version == 1) readersCompressed[i] = new LasReadItemCompressedByteV1(dec, items[i].Size);
-                            else if (items[i].Version == 2) readersCompressed[i] = new LasReadItemCompressedByteV2(dec, items[i].Size);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                this.readersCompressed[i] = new LasReadItemCompressedByteV1(this.decoder, items[i].Size);
+                            else if (items[i].Version == 2)
+                                this.readersCompressed[i] = new LasReadItemCompressedByteV2(this.decoder, items[i].Size);
+                            else 
+                                return false;
                             break;
-                        default: return false;
+                        case LasItemType.Point14:
+                            if ((items[i].Version == 3) || (items[i].Version == 2)) // version == 2 from lasproto
+                                this.readersCompressed[i] = new LasReadItemCompressedPoint14v3(this.decoder, this.decompressSelective);
+                            else if (items[i].Version == 4)
+                                this.readersCompressed[i] = new LasReadItemCompressedPoint14v4(this.decoder, this.decompressSelective);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Rgb14:
+                            if ((items[i].Version == 3) || (items[i].Version == 2)) // version == 2 from lasproto
+                                this.readersCompressed[i] = new LasReadItemCompressedRgb14v3(this.decoder, this.decompressSelective);
+                            else if (items[i].Version == 4)
+                                this.readersCompressed[i] = new LasReadItemCompressedRgb14v4(this.decoder, this.decompressSelective);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.RgbNir14:
+                            if ((items[i].Version == 3) || (items[i].Version == 2)) // version == 2 from lasproto
+                                this.readersCompressed[i] = new LasReadItemCompressedRgbNir14v3(this.decoder, this.decompressSelective);
+                            else if (items[i].Version == 4)
+                                this.readersCompressed[i] = new LasReadItemCompressedRgbNir14v4(this.decoder, this.decompressSelective);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Byte14:
+                            if ((items[i].Version == 3) || (items[i].Version == 2)) // version == 2 from lasproto
+                                this.readersCompressed[i] = new LasReadItemCompressedByte14v3(this.decoder, items[i].Size, this.decompressSelective);
+                            else if (items[i].Version == 4)
+                                this.readersCompressed[i] = new LasReadItemCompressedByte14v4(this.decoder, items[i].Size, this.decompressSelective);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Wavepacket13:
+                            if (items[i].Version == 1)
+                                this.readersCompressed[i] = new LASreadItemCompressedWavepacket13v1(this.decoder);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Wavepacket14:
+                            if (items[i].Version == 3)
+                                this.readersCompressed[i] = new LasReadItemCompressedWavepacket14v3(this.decoder, this.decompressSelective);
+                            else if (items[i].Version == 4)
+                                this.readersCompressed[i] = new LasReadItemCompressedWavepacket14v4(this.decoder, this.decompressSelective);
+                            else
+                                return false;
+                            break;
+                        default: 
+                            return false;
+                    }
+
+                    if (i != 0)
+                    {
+                        if (this.layeredLas14compression)
+                        {
+                            // because combo LAS 1.0 - 1.4 point struct has padding
+                            this.seekPoint[i] = (byte)(this.seekPoint[i - 1] + (2 * items[i - 1].Size));
+                        }
+                        else
+                        {
+                            this.seekPoint[i] = (byte)(this.seekPoint[i - 1] + items[i - 1].Size);
+                        }
                     }
                 }
 
                 if (lasZip.Compressor == LasZip.CompressorPointwiseChunked)
                 {
-                    if (lasZip.ChunkSize != 0) chunkSize = lasZip.ChunkSize;
-                    numberChunks = UInt32.MaxValue;
+                    if (lasZip.ChunkSize != 0) { this.chunkSize = lasZip.ChunkSize; }
+                    this.numberChunks = UInt32.MaxValue;
                 }
             }
             return true;
@@ -146,15 +258,13 @@ namespace LasZip
 
         public bool Init(Stream instream)
         {
-            if (instream == null) return false;
             this.inStream = instream;
-
             for (int i = 0; i < numReaders; i++)
             {
                 ((LasReadItemRaw)(readersRaw[i])).Init(instream);
             }
 
-            if (dec != null)
+            if (decoder != null)
             {
                 chunkCount = chunkSize;
                 pointStart = 0;
@@ -171,10 +281,13 @@ namespace LasZip
 
         public bool Seek(UInt32 current, UInt32 target)
         {
-            if (!inStream.CanSeek) { return false; }
+            if (!inStream.CanSeek) 
+            { 
+                return false; 
+            }
 
             UInt32 delta = 0;
-            if (dec != null)
+            if (decoder != null)
             {
                 if (pointStart == 0)
                 {
@@ -200,7 +313,7 @@ namespace LasZip
                     {
                         if (currentChunk < (tabledChunks - 1))
                         {
-                            dec.Done();
+                            decoder.Done();
                             currentChunk = (tabledChunks - 1);
                             inStream.Seek(chunkStarts[(int)currentChunk], SeekOrigin.Begin);
                             InitDec();
@@ -210,7 +323,7 @@ namespace LasZip
                     }
                     else if (currentChunk != targetChunk || current > target)
                     {
-                        dec.Done();
+                        decoder.Done();
                         currentChunk = targetChunk;
                         inStream.Seek(chunkStarts[(int)currentChunk], SeekOrigin.Begin);
                         InitDec();
@@ -223,7 +336,7 @@ namespace LasZip
                 }
                 else if (current > target)
                 {
-                    dec.Done();
+                    decoder.Done();
                     inStream.Seek(pointStart, SeekOrigin.Begin);
                     InitDec();
                     delta = target;
@@ -235,7 +348,7 @@ namespace LasZip
 
                 while (delta != 0)
                 {
-                    TryRead(seekPoint);
+                    this.TryRead(this.seekPoint);
                     delta--;
                 }
             }
@@ -249,15 +362,15 @@ namespace LasZip
             return true;
         }
 
-        public bool TryRead(LasPoint point)
+        public bool TryRead(Span<byte> point)
         {
-            if (dec != null)
+            if (this.decoder != null)
             {
                 if (chunkCount == chunkSize)
                 {
                     if (pointStart != 0)
                     {
-                        dec.Done();
+                        decoder.Done();
                         currentChunk++;
                         // check integrity
                         if (currentChunk < tabledChunks)
@@ -271,38 +384,30 @@ namespace LasZip
                             }
                         }
                     }
-                    InitDec();
+                    this.InitDec();
                     if (currentChunk == tabledChunks) // no or incomplete chunk table?
                     {
-                        //if(current_chunk==number_chunks)
-                        //{
-                        //    number_chunks+=256;
-                        //    chunk_starts=(I64*)realloc(chunk_starts, sizeof(I64)*(number_chunks+1));
-                        //}
-                        //chunkStarts[tabled_chunks]=pointStart; // needs fixing
-
-                        // If there was no(!) chunk table, we haven't had the chance to create the chunk_starts list.
-                        if (tabledChunks == 0 && chunkStarts == null) { chunkStarts = new List<long>(); }
-
-                        chunkStarts.Add(pointStart);
-                        numberChunks++;
-                        tabledChunks++;
+                        if (this.currentChunk >= this.numberChunks)
+                        {
+                            this.numberChunks += 256;
+                            // this.chunkStarts.Capacity = (int)(this.numberChunks + 1);
+                        }
+                        this.chunkStarts.Add(pointStart);
+                        this.tabledChunks++;
                     }
                     else if (chunkTotals != null) // variable sized chunks?
                     {
-                        chunkSize = chunkTotals[currentChunk + 1] - chunkTotals[currentChunk];
+                        this.chunkSize = this.chunkTotals[this.currentChunk + 1] - this.chunkTotals[this.currentChunk];
                     }
-                    chunkCount = 0;
+                    this.chunkCount = 0;
                 }
-                chunkCount++;
+                this.chunkCount++;
 
-                // BUGBUG: no check for end of points so TryRead() will return true after reading past the end of the points with
-                // .laz files
-                if (readers != null)
+                if (this.readers != null)
                 {
-                    for (int i = 0; i < numReaders; i++)
+                    for (int i = 0; i < this.numReaders; i++)
                     {
-                        if (readers[i].TryRead(point) == false)
+                        if (this.readers[i].TryRead(point, 0) == false)
                         {
                             return false;
                         }
@@ -310,20 +415,40 @@ namespace LasZip
                 }
                 else
                 {
-                    for (int i = 0; i < numReaders; i++)
+                    if (this.layeredLas14compression)
                     {
-                        readersRaw[i].TryRead(point);
-                        ((LasReadItemCompressed)(readersCompressed[i])).Init(point);
+                        // for layered compression 'dec' only hands over the stream
+                        this.decoder.Init(this.inStream, false);
+                        // read how many points are in the chunk
+                        UInt32 count = this.inStream.ReadUInt32LittleEndian();
+                        // read the sizes of all layers
+                        for (int i = 0; i < this.numReaders; i++)
+                        {
+                            ((LasReadItemCompressed)this.readersCompressed[i]).ChunkSizes();
+                        }
+                        for (int i = 0; i < this.numReaders; i++)
+                        {
+                            ((LasReadItemCompressed)this.readersCompressed[i]).Init(point[i..], 0);
+                        }
                     }
-                    readers = readersCompressed;
-                    dec.Init(inStream);
+                    else
+                    {
+                        for (int i = 0; i < this.numReaders; i++)
+                        {
+                            this.readersRaw[i].TryRead(point, 0);
+                            ((LasReadItemCompressed)this.readersCompressed[i]).Init(point, 0);
+                        }
+                        this.decoder.Init(inStream);
+                    }
+
+                    this.readers = this.readersCompressed;
                 }
             }
             else
             {
-                for (int i = 0; i < numReaders; i++)
+                for (int i = 0; i < this.numReaders; i++)
                 {
-                    if (readers[i].TryRead(point) == false)
+                    if (this.readers[i].TryRead(point, 0) == false)
                     {
                         return false;
                     }
@@ -335,11 +460,11 @@ namespace LasZip
 
         public bool CheckEnd()
         {
-            if (readers == readersCompressed)
+            if (this.readers == this.readersCompressed)
             {
-                if (this.dec != null)
+                if (this.decoder != null)
                 {
-                    this.dec.Done();
+                    this.decoder.Done();
                     this.currentChunk++;
                     // check integrity
                     if (this.currentChunk < this.tabledChunks)
@@ -381,12 +506,8 @@ namespace LasZip
 
         private bool ReadChunkTable()
         {
-            byte[] buffer = new byte[8];
-
             // read the 8 bytes that store the location of the chunk table
-            long chunkTableStartPosition;
-            if (inStream.Read(buffer, 0, 8) != 8) { throw new EndOfStreamException(); }
-            chunkTableStartPosition = BitConverter.ToInt64(buffer, 0);
+            long chunkTableStartPosition = this.inStream.ReadInt64LittleEndian();
 
             // this is where the chunks start
             long chunksStart = inStream.Position;
@@ -394,23 +515,20 @@ namespace LasZip
             if ((chunkTableStartPosition + 8) == chunksStart)
             {
                 // no choice but to fail if adaptive chunking was used
-                if (chunkSize == UInt32.MaxValue)
+                if (this.chunkSize == UInt32.MaxValue)
                 {
-                    return false;
+                    throw new InvalidOperationException("compressor was interrupted before writing adaptive chunk table of .laz file");
                 }
 
                 // otherwise we build the chunk table as we read the file
                 numberChunks = 0;
-                chunkStarts = new()
-                {
-                    chunksStart
-                };
+                chunkStarts = [ chunksStart ];
                 numberChunks++;
                 tabledChunks = 1;
                 return true;
             }
 
-            if (!inStream.CanSeek)
+            if (inStream.CanSeek == false)
             {
                 // no choice but to fail if adaptive chunking was used
                 if (chunkSize == UInt32.MaxValue)
@@ -418,8 +536,8 @@ namespace LasZip
                     return false;
                 }
 
-                // if the stream is not seekable we cannot seek to the chunk table but won't need it anyways
-                numberChunks = UInt32.MaxValue - 1;
+                // then we cannot seek to the chunk table but won't need it anyways
+                numberChunks = 0;
                 tabledChunks = 0;
                 return true;
             }
@@ -431,48 +549,49 @@ namespace LasZip
                 {
                     return false;
                 }
-                if (inStream.Read(buffer, 0, 8) != 8) throw new EndOfStreamException();
-                chunkTableStartPosition = BitConverter.ToInt64(buffer, 0);
+                chunkTableStartPosition = this.inStream.ReadInt64LittleEndian();
             }
 
             // read the chunk table
+            // seek to where the chunk table
             inStream.Seek(chunkTableStartPosition, SeekOrigin.Begin);
-
-            inStream.Read(buffer, 0, 8);
-            UInt32 version = BitConverter.ToUInt32(buffer, 0);
-            if (version != 0) { throw new IOException(); }
-
-            numberChunks = BitConverter.ToUInt32(buffer, 4);
-            chunkTotals = null;
-            chunkStarts = null;
-            if (chunkSize == UInt32.MaxValue)
-            {
-                chunkTotals = new UInt32[numberChunks + 1];
-                chunkTotals[0] = 0;
+            UInt32 version = this.inStream.ReadUInt32LittleEndian();
+            if (version != 0)
+            { 
+                throw new IOException(); // fail if the version is wrong
             }
 
-            chunkStarts = new()
+            this.numberChunks = this.inStream.ReadUInt32LittleEndian();
+            this.chunkTotals = null;
+            this.chunkStarts = null;
+            if (this.chunkSize == UInt32.MaxValue)
+            {
+                this.chunkTotals = new UInt32[this.numberChunks + 1];
+                this.chunkTotals[0] = 0;
+            }
+
+            this.chunkStarts = new()
             {
                 chunksStart
             };
-            tabledChunks = 1;
+            this.tabledChunks = 1;
 
-            if (numberChunks > 0)
+            if (this.numberChunks > 0)
             {
-                dec.Init(inStream);
-                IntegerCompressor ic = new(dec, 32, 2);
+                this.decoder.Init(inStream);
+                IntegerCompressor ic = new(this.decoder, 32, 2);
                 ic.InitDecompressor();
-                for (int i = 1; i <= numberChunks; i++)
+                for (int i = 1; i <= this.numberChunks; i++)
                 {
-                    if (chunkSize == UInt32.MaxValue) chunkTotals[i] = (UInt32)ic.Decompress((i > 1 ? (int)chunkTotals[i - 1] : 0), 0);
-                    chunkStarts.Add(ic.Decompress((i > 1 ? (int)(chunkStarts[i - 1]) : 0), 1));
-                    tabledChunks++;
+                    if (chunkSize == UInt32.MaxValue) { this.chunkTotals[i] = (UInt32)ic.Decompress((i > 1 ? (int)this.chunkTotals[i - 1] : 0), 0); }
+                    this.chunkStarts.Add(ic.Decompress((i > 1 ? (int)(chunkStarts[i - 1]) : 0), 1));
+                    this.tabledChunks++;
                 }
-                dec.Done();
-                for (int i = 1; i <= numberChunks; i++)
+                this.decoder.Done();
+                for (int i = 1; i <= this.numberChunks; i++)
                 {
-                    if (chunkSize == UInt32.MaxValue) chunkTotals[i] += chunkTotals[i - 1];
-                    chunkStarts[i] += chunkStarts[i - 1];
+                    if (this.chunkSize == UInt32.MaxValue) { chunkTotals[i] += chunkTotals[i - 1]; }
+                    this.chunkStarts[i] += this.chunkStarts[i - 1];
                 }
             }
 

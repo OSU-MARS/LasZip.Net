@@ -18,11 +18,11 @@ namespace LasZip
 
         public LasZipDllInventory()
         {
-            this.NumberOfPointsByReturn = new UInt32[8]; // left as zero
+            this.NumberOfPointsByReturn = new UInt32[16]; // left as zero
             this.NumberOfPointRecords = 0;
             this.MaxX = 0;
             this.MinX = 0;
-            this.MaxY = 0; 
+            this.MaxY = 0;
             this.MinY = 0;
             this.MaxZ = 0; 
             this.MinZ = 0;
@@ -37,44 +37,57 @@ namespace LasZip
         public void Add(LasPoint point)
         {
             this.NumberOfPointRecords++;
-            this.NumberOfPointsByReturn[point.ReturnNumber]++;
+            if (point.ExtendedPointType != 0)
+            {
+                this.NumberOfPointsByReturn[point.ExtendedReturnNumber]++;
+            }
+            else
+            {
+                if (this.NumberOfPointRecords == UInt32.MaxValue)
+                {
+                    throw new NotSupportedException("Reached " + UInt32.MaxValue + " points.");
+                }
+
+                this.NumberOfPointsByReturn[point.ReturnNumber]++;
+            }
+
             if (noPointsAdded)
             {
-                MinX = point.X;
-                MaxX = point.X;
-                MinY = point.Y;
-                MaxY = point.Y;
-                MinZ = point.Z;
-                MaxZ = point.Z;
-                noPointsAdded = false;
+                this.MinX = point.X;
+                this.MaxX = point.X;
+                this.MinY = point.Y;
+                this.MaxY = point.Y;
+                this.MinZ = point.Z;
+                this.MaxZ = point.Z;
+                this.noPointsAdded = false;
             }
             else
             {
                 if (point.X < MinX) 
-                { 
-                    MinX = point.X; 
+                {
+                    this.MinX = point.X; 
                 }
                 else if (point.X > MaxX) 
-                { 
-                    MaxX = point.X; 
+                {
+                    this.MaxX = point.X; 
                 }
                 
                 if (point.Y < MinY) 
-                { 
-                    MinY = point.Y; 
+                {
+                    this.MinY = point.Y; 
                 }
                 else if (point.Y > MaxY) 
-                { 
-                    MaxY = point.Y; 
+                {
+                    this.MaxY = point.Y; 
                 }
                 
                 if (point.Z < MinZ) 
-                { 
-                    MinZ = point.Z; 
+                {
+                    this.MinZ = point.Z; 
                 }
                 else if (point.Z > MaxZ) 
-                { 
-                    MaxZ = point.Z; 
+                {
+                    this.MaxZ = point.Z; 
                 }
             }
         }

@@ -6,50 +6,43 @@ namespace LasZip
 {
     internal class LasReadItemCompressedByteV1 : LasReadItemCompressed
     {
-        private readonly ArithmeticDecoder dec;
-        private readonly UInt32 number;
+        private readonly ArithmeticDecoder decoder;
+        private readonly int number;
         private readonly byte[] lastItem;
 
         private readonly IntegerCompressor icByte;
 
-        public LasReadItemCompressedByteV1(ArithmeticDecoder dec, UInt32 number)
+        public LasReadItemCompressedByteV1(ArithmeticDecoder decoder, UInt32 number)
         {
-            // set decoder
-            Debug.Assert(dec != null);
-            this.dec = dec;
-            Debug.Assert(number != 0);
-            this.number = number;
+            Debug.Assert(number > 0);
+
+            this.decoder = decoder;
+            this.number = (int)number;
 
             // create models and integer compressors
-            icByte = new IntegerCompressor(dec, 8, number);
+            this.icByte = new IntegerCompressor(decoder, 8, number);
 
             // create last item
-            lastItem = new byte[number];
+            this.lastItem = new byte[number];
         }
 
-        public override bool Init(LasPoint item)
+        public override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
-            if (item.ExtraBytes == null)
-            {
-                throw new InvalidOperationException();
-            }
-
             // init state
-
             // init models and integer compressors
-            icByte.InitDecompressor();
+            this.icByte.InitDecompressor();
 
             // init last item
-            Buffer.BlockCopy(item.ExtraBytes, 0, lastItem, 0, (int)number);
+            item[..this.number].CopyTo(this.lastItem);
 
             return true;
         }
 
-        public override bool TryRead(LasPoint item)
+        public override bool TryRead(Span<byte> item, UInt32 context)
         {
-            for (UInt32 i = 0; i < this.number; i++)
+            for (int index = 0; index < this.number; index++)
             {
-                lastItem[i] = item.ExtraBytes[i] = (byte)(icByte.Decompress(lastItem[i], i));
+                item[index] = (byte)icByte.Decompress(lastItem[index], (UInt32)index);
             }
 
             return true;

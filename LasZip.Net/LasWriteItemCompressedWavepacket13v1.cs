@@ -27,13 +27,14 @@
 //===============================================================================
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 
 namespace LasZip
 {
     internal class LasWriteItemCompressedWavepacket13v1 : LasWriteItemCompressed
     {
-        private readonly ArithmeticEncoder enc;
+        private readonly ArithmeticEncoder encoder;
         private LasWavepacket13 lastItem;
 
         private int lastDiff32;
@@ -49,7 +50,7 @@ namespace LasZip
         {
             // set encoder
             Debug.Assert(enc != null);
-            this.enc = enc;
+            this.encoder = enc;
 
             // create models and integer compressors
             packetIndex = ArithmeticEncoder.CreateSymbolModel(256);
@@ -63,80 +64,89 @@ namespace LasZip
             icXyz = new IntegerCompressor(enc, 32, 3);
         }
 
-        public unsafe override bool Init(LasPoint item)
+        public unsafe override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
             // init state
-            lastDiff32 = 0;
-            symLastOffsetDiff = 0;
+            this.lastDiff32 = 0;
+            this.symLastOffsetDiff = 0;
 
             // init models and integer compressors
-            ArithmeticEncoder.InitSymbolModel(packetIndex);
-            ArithmeticEncoder.InitSymbolModel(offsetDiff[0]);
-            ArithmeticEncoder.InitSymbolModel(offsetDiff[1]);
-            ArithmeticEncoder.InitSymbolModel(offsetDiff[2]);
-            ArithmeticEncoder.InitSymbolModel(offsetDiff[3]);
-            icOffsetDiff.InitCompressor();
-            icPacketSize.InitCompressor();
-            icReturnPoint.InitCompressor();
-            icXyz.InitCompressor();
+            ArithmeticEncoder.InitSymbolModel(this.packetIndex);
+            ArithmeticEncoder.InitSymbolModel(this.offsetDiff[0]);
+            ArithmeticEncoder.InitSymbolModel(this.offsetDiff[1]);
+            ArithmeticEncoder.InitSymbolModel(this.offsetDiff[2]);
+            ArithmeticEncoder.InitSymbolModel(this.offsetDiff[3]);
+            this.icOffsetDiff.InitCompressor();
+            this.icPacketSize.InitCompressor();
+            this.icReturnPoint.InitCompressor();
+            this.icXyz.InitCompressor();
 
             // init last item
-            fixed (byte* pItem = item.Wavepacket)
-            {
-                lastItem = *(LasWavepacket13*)(pItem + 1);
-            }
+            this.lastItem.Offset = BinaryPrimitives.ReadUInt64LittleEndian(item);
+            this.lastItem.PacketSize = BinaryPrimitives.ReadUInt32LittleEndian(item[8..]);
+            this.lastItem.ReturnPoint.Int32 = BinaryPrimitives.ReadInt32LittleEndian(item[12..]);
+            this.lastItem.X.Int32 = BinaryPrimitives.ReadInt32LittleEndian(item[16..]);
+            this.lastItem.Y.Int32 = BinaryPrimitives.ReadInt32LittleEndian(item[20..]);
+            this.lastItem.Z.Int32 = BinaryPrimitives.ReadInt32LittleEndian(item[24..]);
 
             return true;
         }
 
-        public unsafe override bool Write(LasPoint item)
+        public override bool Write(ReadOnlySpan<byte> item, UInt32 context)
         {
-            enc.EncodeSymbol(packetIndex, item.Wavepacket[0]);
+            this.encoder.EncodeSymbol(packetIndex, item[0]); // wavepacket descriptor index
 
-            fixed (byte* pItem = item.Wavepacket)
+            // calculate the difference between the two offsets
+            UInt64 offset = BinaryPrimitives.ReadUInt64LittleEndian(item[1..]);
+            Int64 currDiff64 = (Int64)(offset - lastItem.Offset);
+            int currDiff32 = (int)currDiff64;
+
+            // if the current difference can be represented with 32 bits
+            if (currDiff64 == (Int64)(currDiff32))
             {
-                LasWavepacket13* wave = (LasWavepacket13*)(pItem + 1);
-
-                // calculate the difference between the two offsets
-                Int64 curr_diff_64 = (Int64)(wave->Offset - lastItem.Offset);
-                int curr_diff_32 = (int)curr_diff_64;
-
-                // if the current difference can be represented with 32 bits
-                if (curr_diff_64 == (Int64)(curr_diff_32))
+                if (currDiff32 == 0) // current difference is zero
                 {
-                    if (curr_diff_32 == 0) // current difference is zero
-                    {
-                        enc.EncodeSymbol(offsetDiff[symLastOffsetDiff], 0);
-                        symLastOffsetDiff = 0;
-                    }
-                    else if (curr_diff_32 == (int)lastItem.PacketSize) // current difference is size of last packet
-                    {
-                        enc.EncodeSymbol(offsetDiff[symLastOffsetDiff], 1);
-                        symLastOffsetDiff = 1;
-                    }
-                    else // 
-                    {
-                        enc.EncodeSymbol(offsetDiff[symLastOffsetDiff], 2);
-                        symLastOffsetDiff = 2;
-                        icOffsetDiff.Compress(lastDiff32, curr_diff_32);
-                        lastDiff32 = curr_diff_32;
-                    }
+                    this.encoder.EncodeSymbol(offsetDiff[symLastOffsetDiff], 0);
+                    symLastOffsetDiff = 0;
+                }
+                else if (currDiff32 == (int)lastItem.PacketSize) // current difference is size of last packet
+                {
+                    this.encoder.EncodeSymbol(offsetDiff[symLastOffsetDiff], 1);
+                    symLastOffsetDiff = 1;
                 }
                 else
                 {
-                    enc.EncodeSymbol(offsetDiff[symLastOffsetDiff], 3);
-                    symLastOffsetDiff = 3;
-                    enc.WriteInt64(wave->Offset);
+                    this.encoder.EncodeSymbol(offsetDiff[symLastOffsetDiff], 2);
+                    symLastOffsetDiff = 2;
+                    this.icOffsetDiff.Compress(lastDiff32, currDiff32);
+                    lastDiff32 = currDiff32;
                 }
-
-                icPacketSize.Compress((int)lastItem.PacketSize, (int)wave->PacketSize);
-                icReturnPoint.Compress(lastItem.ReturnPoint.Int32, wave->ReturnPoint.Int32);
-                icXyz.Compress(lastItem.X.Int32, wave->X.Int32, 0);
-                icXyz.Compress(lastItem.Y.Int32, wave->Y.Int32, 1);
-                icXyz.Compress(lastItem.Z.Int32, wave->Z.Int32, 2);
-
-                lastItem = *wave;
             }
+            else
+            {
+                this.encoder.EncodeSymbol(offsetDiff[symLastOffsetDiff], 3);
+                symLastOffsetDiff = 3;
+                this.encoder.WriteInt64(offset);
+            }
+
+            UInt32 packetSize = BinaryPrimitives.ReadUInt32LittleEndian(item[9..]);
+            Int32 returnPoint = BinaryPrimitives.ReadInt32LittleEndian(item[13..]);
+            Int32 x = BinaryPrimitives.ReadInt32LittleEndian(item[17..]);
+            Int32 y = BinaryPrimitives.ReadInt32LittleEndian(item[21..]);
+            Int32 z = BinaryPrimitives.ReadInt32LittleEndian(item[25..]);
+
+            this.icPacketSize.Compress((int)lastItem.PacketSize, (int)packetSize);
+            this.icReturnPoint.Compress(lastItem.ReturnPoint.Int32, returnPoint);
+            this.icXyz.Compress(lastItem.X.Int32, x, 0);
+            this.icXyz.Compress(lastItem.Y.Int32, y, 1);
+            this.icXyz.Compress(lastItem.Z.Int32, y, 2);
+
+            this.lastItem.Offset = offset;
+            this.lastItem.PacketSize = packetSize;
+            this.lastItem.ReturnPoint.Int32 = returnPoint;
+            this.lastItem.X.Int32 = x;
+            this.lastItem.Y.Int32 = y;
+            this.lastItem.Z.Int32 = z;
 
             return true;
         }

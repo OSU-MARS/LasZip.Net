@@ -5,7 +5,7 @@ namespace LasZip
 {
     internal static class EncodeDecode
     {
-        public const int BufferSize = 1024;
+        public const int BufferSize = 4096; // AC_HEADER_BYTE is unused in C++ source
 
         public const UInt32 MinLength = 0x01000000u; // threshold for renormalization
         public const UInt32 MaxLength = 0xFFFFFFFFu; // maximum AC interval length

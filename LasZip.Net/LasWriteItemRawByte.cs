@@ -5,16 +5,16 @@ namespace LasZip
 {
     internal class LasWriteItemRawByte : LasWriteItemRaw
     {
-        private readonly UInt32 number = 0;
+        private readonly int number = 0;
 
         public LasWriteItemRawByte(UInt32 number)
         {
-            this.number = number;
+            this.number = (int)number;
         }
 
-        public override bool Write(LasPoint item)
+        public override bool Write(ReadOnlySpan<byte> item, UInt32 context)
         {
-            OutStream.Write(item.ExtraBytes, 0, (int)number);
+            this.OutStream.Write(item[..this.number]);
             return true;
         }
     }

@@ -1,4 +1,4 @@
-### Overview
+﻿### Overview
 LasZip.Net is a reimplementation of [LASzip](https://rapidlasso.de/laszip/) entirely in C#. This repo's primary purpose is keeping LASzip's 
 C# implementation in sync with its C++ version. Towards that end, a copy of [the C++ version](https://github.com/LAStools/LAStools/tree/master/LASzip/src) 
 is included in this repo as a tracking mechanism. As LASzip changes its updated files can be dropped into the C++ reference directory and 
@@ -15,12 +15,38 @@ and parameters controlling use of `delete` in C++ do not apply to C# garbage col
 
 Internally, LasZip.Net is more rigorous in following the convention of one type per file. Additionally,
 
-- The LASzip build defines `LASZIPDLL_EXPORTS`. Only C++ code which is meaningful under this definition is ported, resulting in the omission
-  of a few methods present in the LASzip source but, if called against LASzip.dll, mostly just return `false` to indicate they don't do anything.
-- `LASzipper`, `LASunzipper`, and the big and little endian implementations of `ByteStreamInIstream` and `ByteStreamOutOstream` have not been
-  ported. `ByteStreamOutNil`, `ByteStreamInOut`, and its derived types have also not been ported as they're not used within LASzip.dll.
+- Rather than LASzip's colletion of streams, `System.Buffers.Binary.BinaryPrimitives` is used to handle serialization to and from .las and .laz 
+  files' little endian format to the processor's endianness (nearly always little). This also fixes a few holes where LASzip fails to convert to 
+  or from little endian.
 - Error handling code in `catch` blocks is not ported as, in C#, there's no reason to mask the underlying exception. This also means 
   LasZip.Net delegates handling of corrupted chunks of points to its caller rather than skipping to the next chunk as LASzip does.
+- The LASzip build defines `LASZIPDLL_EXPORTS`. Only C++ code which is meaningful under this definition is ported, resulting in the omission
+  of a few methods present in the LASzip source but, if called against LASzip.dll, mostly just return `false` to indicate they don't do anything.
+
+### Known Issues
+
+- Rather than use exceptions, LASzip APIs rely on constant caller error checking. Since this is unnatural in C#, where exceptions are 
+  expected to be used to offload callers from error checking, LasZip.Net typically throws where an error would be recorded by LASzip. This
+  is a reasonable, but formally, breaking change. Additionally, a broad range of APIs haven't yet been cleaned and either still return
+  codes for their callers to check, instead of making an informative local throw, or always return success rather than having a `void`
+  signature.
+- LASzip logs warnings to either internal strings or stderr and also contains some verbose logging. These systems have not yet been
+  converted to standard .NET tracing.
+- The LASzip C++ sources have a certain tendency to silently ignore user input. As this is rarely desirable behavior, code changes in 
+  LasZip.Net favor throwing in such situations. As a result, LasZip.Net may detect data slicing or bugs in its callers where LASzip does 
+  not.
+- The LASzip C++ sources omit many checks for null and therefore have many potential failure points. These are automatically flagged as 
+  nullability issues in C# and are slowly being addressed, either by fixing them or by updating code style in cases where Visual Studio
+  2022 (17.7.6 and newer) incorrectly reports a nullability issue.
+- The LASzip C++ sources sometimes use double precision floating point numbers as intermediate representations when serializing and deserializing
+  integers (8—64 bit, both signed and unsigned) and may therefore be lossy due to numerical rounding on paths where error free integer
+  propagation would reasonably be expected. This has not yet been addressed in the C# sources.
+- The LASzip C++ sources often use signed and unsigned integers, particularly 32 bit ones, interchangeably. In C# this leads to frequent
+  explicit casts to convert between types, moreso because C# APIs often support only signed integers as indices into arrays or similar
+  data structures. This confusion of signatures has not yet been rationalized and is sometimes exposed to callers in public C# APIs.
+- The LASzip C++ sources not uncommonly contain duplicate instances of the same code or near duplicates which appear intended to produce
+  identical output. Some of these have been rationalized in C#, in a few cases creating small but―strictly―breaking changes, and many 
+  haven't yet been rationalized.
 
 ### Evolution from earlier versions
 This repo is forked from [@shintadono's initial implementation of laszip.net](https://github.com/shintadono/laszip.net), which was last

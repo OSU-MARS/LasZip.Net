@@ -1,6 +1,6 @@
 ﻿// lasreaditemcompressed_v2.{hpp, cpp}
 using System;
-using System.Diagnostics;
+using System.Buffers.Binary;
 
 namespace LasZip
 {
@@ -13,7 +13,7 @@ namespace LasZip
 
         private const int LasZipGpstimeMultiTotal = (LasZipGpstimeMulti - LasZipGpstimeMultiMinus + 6);
 
-        private readonly ArithmeticDecoder dec;
+        private readonly ArithmeticDecoder decoder;
         private UInt32 last;
         private UInt32 next;
         private readonly Interpretable64[] lastGpstime;
@@ -24,81 +24,80 @@ namespace LasZip
         private readonly ArithmeticModel gpstime0diff;
         private readonly IntegerCompressor icGpstime;
 
-        public LasReadItemCompressedGpstime11v2(ArithmeticDecoder dec)
+        public LasReadItemCompressedGpstime11v2(ArithmeticDecoder decoder)
         {
-            // set decoder
-            Debug.Assert(dec != null);
-            this.dec = dec;
+            this.decoder = decoder;
             this.lastGpstime = new Interpretable64[4];
             this.lastGpstimeDiff = new int[4];
             this.multiExtremeCounter = new int[4];
 
             // create entropy models and integer compressors
-            gpstimeMulti = ArithmeticDecoder.CreateSymbolModel(LasZipGpstimeMultiTotal);
-            gpstime0diff = ArithmeticDecoder.CreateSymbolModel(6);
-            icGpstime = new IntegerCompressor(dec, 32, 9); // 32 bits, 9 contexts
+            this.gpstimeMulti = ArithmeticDecoder.CreateSymbolModel(LasReadItemCompressedGpstime11v2.LasZipGpstimeMultiTotal);
+            this.gpstime0diff = ArithmeticDecoder.CreateSymbolModel(6);
+            this.icGpstime = new IntegerCompressor(decoder, 32, 9); // 32 bits, 9 contexts
         }
 
-        public override bool Init(LasPoint item)
+        public override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
             // init state
-            last = 0; next = 0;
-            lastGpstimeDiff[0] = 0;
-            lastGpstimeDiff[1] = 0;
-            lastGpstimeDiff[2] = 0;
-            lastGpstimeDiff[3] = 0;
-            multiExtremeCounter[0] = 0;
-            multiExtremeCounter[1] = 0;
-            multiExtremeCounter[2] = 0;
-            multiExtremeCounter[3] = 0;
+            this.last = 0;
+            this.next = 0;
+            this.lastGpstimeDiff[0] = 0;
+            this.lastGpstimeDiff[1] = 0;
+            this.lastGpstimeDiff[2] = 0;
+            this.lastGpstimeDiff[3] = 0;
+            this.multiExtremeCounter[0] = 0;
+            this.multiExtremeCounter[1] = 0;
+            this.multiExtremeCounter[2] = 0;
+            this.multiExtremeCounter[3] = 0;
 
             // init models and integer compressors
             ArithmeticDecoder.InitSymbolModel(gpstimeMulti);
             ArithmeticDecoder.InitSymbolModel(gpstime0diff);
-            icGpstime.InitDecompressor();
+            this.icGpstime.InitDecompressor();
 
             // init last item
-            lastGpstime[0].Double = item.Gpstime;
-            lastGpstime[1].UInt64 = 0;
-            lastGpstime[2].UInt64 = 0;
-            lastGpstime[3].UInt64 = 0;
+            this.lastGpstime[0].Double = BinaryPrimitives.ReadDoubleLittleEndian(item);
+            this.lastGpstime[1].UInt64 = 0;
+            this.lastGpstime[2].UInt64 = 0;
+            this.lastGpstime[3].UInt64 = 0;
             return true;
         }
 
-        public override bool TryRead(LasPoint item)
+        public override bool TryRead(Span<byte> item, UInt32 context)
         {
             if (lastGpstimeDiff[last] == 0) // if the last integer difference was zero
             {
-                int multi = (int)dec.DecodeSymbol(gpstime0diff);
+                int multi = (int)decoder.DecodeSymbol(gpstime0diff);
                 if (multi == 1) // the difference can be represented with 32 bits
                 {
-                    lastGpstimeDiff[last] = icGpstime.Decompress(0, 0);
-                    lastGpstime[last].Int64 += lastGpstimeDiff[last];
-                    multiExtremeCounter[last] = 0;
+                    this.lastGpstimeDiff[last] = this.icGpstime.Decompress(0, 0);
+                    this.lastGpstime[last].Int64 += this.lastGpstimeDiff[last];
+                    this.multiExtremeCounter[last] = 0;
                 }
                 else if (multi == 2) // the difference is huge
                 {
-                    next = (next + 1) & 3;
-                    lastGpstime[next].UInt64 = (UInt64)icGpstime.Decompress((int)(lastGpstime[last].UInt64 >> 32), 8);
-                    lastGpstime[next].UInt64 = lastGpstime[next].UInt64 << 32;
-                    lastGpstime[next].UInt64 |= dec.ReadInt();
-                    last = next;
-                    lastGpstimeDiff[last] = 0;
-                    multiExtremeCounter[last] = 0;
+                    this.next = (next + 1) & 3;
+                    this.lastGpstime[next].UInt64 = (UInt64)icGpstime.Decompress((int)(lastGpstime[last].UInt64 >> 32), 8);
+                    this.lastGpstime[next].UInt64 = this.lastGpstime[next].UInt64 << 32;
+                    this.lastGpstime[next].UInt64 |= this.decoder.ReadUInt32();
+                    this.last = next;
+                    this.lastGpstimeDiff[last] = 0;
+                    this.multiExtremeCounter[last] = 0;
                 }
                 else if (multi > 2) // we switch to another sequence
                 {
-                    last = (UInt32)(last + multi - 2) & 3;
-                    TryRead(item);
+                    this.last = (UInt32)(last + multi - 2) & 3;
+                    this.TryRead(item, context);
                 }
             }
             else
             {
-                int multi = (int)dec.DecodeSymbol(gpstimeMulti);
+                int multi = (int)decoder.DecodeSymbol(gpstimeMulti);
                 if (multi == 1)
                 {
-                    lastGpstime[last].Int64 += icGpstime.Decompress(lastGpstimeDiff[last], 1); ;
-                    multiExtremeCounter[last] = 0;
+                    this.lastGpstime[last].Int64 += icGpstime.Decompress(lastGpstimeDiff[last], 1); ;
+                    this.multiExtremeCounter[last] = 0;
                 }
                 else if (multi < LasZipGpstimeMultiUnchanged)
                 {
@@ -148,25 +147,26 @@ namespace LasZip
                             }
                         }
                     }
-                    lastGpstime[last].Int64 += gpstime_diff;
+                    this.lastGpstime[last].Int64 += gpstime_diff;
                 }
                 else if (multi == LasZipGpstimeMultiCodeFull)
                 {
-                    next = (next + 1) & 3;
-                    lastGpstime[next].UInt64 = (UInt64)icGpstime.Decompress((int)(lastGpstime[last].UInt64 >> 32), 8);
-                    lastGpstime[next].UInt64 = lastGpstime[next].UInt64 << 32;
-                    lastGpstime[next].UInt64 |= dec.ReadInt();
-                    last = next;
-                    lastGpstimeDiff[last] = 0;
-                    multiExtremeCounter[last] = 0;
+                    this.next = (next + 1) & 3;
+                    this.lastGpstime[next].UInt64 = (UInt64)icGpstime.Decompress((int)(lastGpstime[last].UInt64 >> 32), 8);
+                    this.lastGpstime[next].UInt64 = lastGpstime[next].UInt64 << 32;
+                    this.lastGpstime[next].UInt64 |= decoder.ReadUInt32();
+                    this.last = next;
+                    this.lastGpstimeDiff[last] = 0;
+                    this.multiExtremeCounter[last] = 0;
                 }
                 else if (multi >= LasZipGpstimeMultiCodeFull)
                 {
-                    last = (UInt32)(last + multi - LasZipGpstimeMultiCodeFull) & 3;
-                    TryRead(item);
+                    this.last = (UInt32)(last + multi - LasZipGpstimeMultiCodeFull) & 3;
+                    this.TryRead(item, context);
                 }
             }
-            item.Gpstime = lastGpstime[last].Double;
+
+            BinaryPrimitives.WriteDoubleLittleEndian(item, this.lastGpstime[last].Double);
             return true;
         }
     }

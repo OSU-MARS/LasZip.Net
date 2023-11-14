@@ -1,13 +1,13 @@
 ﻿// lasreaditemcompressed_v1.{hpp, cpp}
 using System;
-using System.Diagnostics;
+using System.Buffers.Binary;
 
 namespace LasZip
 {
     internal class LasReadItemCompressedPoint10v1 : LasReadItemCompressed
     {
-        private readonly ArithmeticDecoder dec;
-        private LasPoint10 last = new();
+        private readonly ArithmeticDecoder decoder;
+        private LasPoint10 lastItem;
 
         private readonly int[] lastXdiff = new int[3];
         private readonly int[] lastYdiff = new int[3];
@@ -24,180 +24,191 @@ namespace LasZip
         private readonly ArithmeticModel?[] classification = new ArithmeticModel?[256];
         private readonly ArithmeticModel?[] userData = new ArithmeticModel?[256];
 
-        public LasReadItemCompressedPoint10v1(ArithmeticDecoder dec)
+        public LasReadItemCompressedPoint10v1(ArithmeticDecoder decoder)
         {
             // set decoder
-            Debug.Assert(dec != null);
-            this.dec = dec;
+            this.decoder = decoder;
+            this.lastItem = new();
+            this.bitByte = new ArithmeticModel?[256]; // left as null
+            this.classification = new ArithmeticModel?[256]; // left as null
+            this.userData = new ArithmeticModel?[256]; // left as null
 
             // create models and integer compressors
-            icX = new IntegerCompressor(dec, 32); // 32 bits, 1 context
-            icY = new IntegerCompressor(dec, 32, 20); // 32 bits, 20 contexts
-            icZ = new IntegerCompressor(dec, 32, 20); // 32 bits, 20 contexts
-            icIntensity = new IntegerCompressor(dec, 16);
-            icScanAngleRank = new IntegerCompressor(dec, 8, 2);
-            icPointSourceID = new IntegerCompressor(dec, 16);
-            changedValues = ArithmeticDecoder.CreateSymbolModel(64);
-            for (int i = 0; i < 256; i++)
-            {
-                bitByte[i] = null;
-                classification[i] = null;
-                userData[i] = null;
-            }
+            this.icX = new IntegerCompressor(decoder, 32); // 32 bits, 1 context
+            this.icY = new IntegerCompressor(decoder, 32, 20); // 32 bits, 20 contexts
+            this.icZ = new IntegerCompressor(decoder, 32, 20); // 32 bits, 20 contexts
+            this.icIntensity = new IntegerCompressor(decoder, 16);
+            this.icScanAngleRank = new IntegerCompressor(decoder, 8, 2);
+            this.icPointSourceID = new IntegerCompressor(decoder, 16);
+            this.changedValues = ArithmeticDecoder.CreateSymbolModel(64);
         }
 
-        public override bool Init(LasPoint item)
+        public override bool Init(ReadOnlySpan<byte> item, UInt32 context)
         {
             // init state
-            lastXdiff[0] = lastXdiff[1] = lastXdiff[2] = 0;
-            lastYdiff[0] = lastYdiff[1] = lastYdiff[2] = 0;
-            lastIncr = 0;
+            this.lastXdiff[0] = this.lastXdiff[1] = this.lastXdiff[2] = 0;
+            this.lastYdiff[0] = this.lastYdiff[1] = this.lastYdiff[2] = 0;
+            this.lastIncr = 0;
 
             // init models and integer compressors
-            icX.InitDecompressor();
-            icY.InitDecompressor();
-            icZ.InitDecompressor();
-            icIntensity.InitDecompressor();
-            icScanAngleRank.InitDecompressor();
-            icPointSourceID.InitDecompressor();
-            ArithmeticDecoder.InitSymbolModel(changedValues);
+            this.icX.InitDecompressor();
+            this.icY.InitDecompressor();
+            this.icZ.InitDecompressor();
+            this.icIntensity.InitDecompressor();
+            this.icScanAngleRank.InitDecompressor();
+            this.icPointSourceID.InitDecompressor();
+            ArithmeticDecoder.InitSymbolModel(this.changedValues);
             for (int i = 0; i < 256; i++)
             {
-                if (bitByte[i] != null) ArithmeticDecoder.InitSymbolModel(bitByte[i]);
-                if (classification[i] != null) ArithmeticDecoder.InitSymbolModel(classification[i]);
-                if (userData[i] != null) ArithmeticDecoder.InitSymbolModel(userData[i]);
+                if (this.bitByte[i] != null) { ArithmeticDecoder.InitSymbolModel(this.bitByte[i]); }
+                if (this.classification[i] != null) { ArithmeticDecoder.InitSymbolModel(this.classification[i]); }
+                if (this.userData[i] != null) { ArithmeticDecoder.InitSymbolModel(this.userData[i]); }
             }
 
-            // init last item
-            last.X = item.X;
-            last.Y = item.Y;
-            last.Z = item.Z;
-            last.Intensity = item.Intensity;
-            last.ReturnNumbersAndFlags = item.ReturnNumbersAndFlags;
-            last.Classification = item.ClassificationAndFlags;
-            last.ScanAngleRank = item.ScanAngleRank;
-            last.UserData = item.UserData;
-            last.PointSourceID = item.PointSourceID;
+            // init lastItem
+            this.lastItem.X = BinaryPrimitives.ReadInt32LittleEndian(item);
+            this.lastItem.Y = BinaryPrimitives.ReadInt32LittleEndian(item[4..]);
+            this.lastItem.Z = BinaryPrimitives.ReadInt32LittleEndian(item[8..]);
+            this.lastItem.Intensity = BinaryPrimitives.ReadUInt16LittleEndian(item[12..]);
+            this.lastItem.ReturnNumbersAndFlags = item[14];
+            this.lastItem.Classification = item[15];
+            this.lastItem.ScanAngleRank = (sbyte)item[16];
+            this.lastItem.UserData = item[17];
+            this.lastItem.PointSourceID = BinaryPrimitives.ReadUInt16LittleEndian(item[18..]);
 
             return true;
         }
 
-        public override bool TryRead(LasPoint item)
+        public override bool TryRead(Span<byte> item, UInt32 context)
         {
             // find median difference for x and y from 3 preceding differences
             int median_x;
             if (lastXdiff[0] < lastXdiff[1])
             {
-                if (lastXdiff[1] < lastXdiff[2]) median_x = lastXdiff[1];
-                else if (lastXdiff[0] < lastXdiff[2]) median_x = lastXdiff[2];
-                else median_x = lastXdiff[0];
+                if (lastXdiff[1] < lastXdiff[2])
+                    median_x = lastXdiff[1];
+                else if (lastXdiff[0] < lastXdiff[2]) 
+                    median_x = lastXdiff[2];
+                else 
+                    median_x = lastXdiff[0];
             }
             else
             {
-                if (lastXdiff[0] < lastXdiff[2]) median_x = lastXdiff[0];
-                else if (lastXdiff[1] < lastXdiff[2]) median_x = lastXdiff[2];
-                else median_x = lastXdiff[1];
+                if (lastXdiff[0] < lastXdiff[2]) 
+                    median_x = lastXdiff[0];
+                else if (lastXdiff[1] < lastXdiff[2])
+                    median_x = lastXdiff[2];
+                else
+                    median_x = lastXdiff[1];
             }
 
             int median_y;
             if (lastYdiff[0] < lastYdiff[1])
             {
-                if (lastYdiff[1] < lastYdiff[2]) median_y = lastYdiff[1];
-                else if (lastYdiff[0] < lastYdiff[2]) median_y = lastYdiff[2];
-                else median_y = lastYdiff[0];
+                if (lastYdiff[1] < lastYdiff[2]) 
+                    median_y = lastYdiff[1];
+                else if (lastYdiff[0] < lastYdiff[2])
+                    median_y = lastYdiff[2];
+                else
+                    median_y = lastYdiff[0];
             }
             else
             {
-                if (lastYdiff[0] < lastYdiff[2]) median_y = lastYdiff[0];
-                else if (lastYdiff[1] < lastYdiff[2]) median_y = lastYdiff[2];
-                else median_y = lastYdiff[1];
+                if (lastYdiff[0] < lastYdiff[2])
+                    median_y = lastYdiff[0];
+                else if (lastYdiff[1] < lastYdiff[2]) 
+                    median_y = lastYdiff[2];
+                else
+                    median_y = lastYdiff[1];
             }
 
             // decompress x y z coordinates
-            int x_diff = icX.Decompress(median_x);
-            last.X += x_diff;
+            int xDiff = icX.Decompress(median_x);
+            lastItem.X += xDiff;
 
             // we use the number k of bits corrector bits to switch contexts
             UInt32 k_bits = icX.GetK();
-            int y_diff = icY.Decompress(median_y, (k_bits < 19 ? k_bits : 19u));
-            last.Y += y_diff;
+            int yDiff = icY.Decompress(median_y, (k_bits < 19 ? k_bits : 19u));
+            lastItem.Y += yDiff;
 
             k_bits = (k_bits + icY.GetK()) / 2;
-            last.Z = icZ.Decompress(last.Z, (k_bits < 19 ? k_bits : 19u));
+            lastItem.Z = icZ.Decompress(lastItem.Z, (k_bits < 19 ? k_bits : 19u));
 
             // decompress which other values have changed
-            UInt32 changed_values = dec.DecodeSymbol(changedValues);
+            UInt32 changed_values = decoder.DecodeSymbol(changedValues);
 
             if (changed_values != 0)
             {
                 // decompress the intensity if it has changed
                 if ((changed_values & 32) != 0)
                 {
-                    last.Intensity = (UInt16)icIntensity.Decompress(last.Intensity);
+                    lastItem.Intensity = (UInt16)icIntensity.Decompress(lastItem.Intensity);
                 }
 
                 // decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
                 if ((changed_values & 16) != 0)
                 {
-                    if (bitByte[last.ReturnNumbersAndFlags] == null)
+                    if (bitByte[lastItem.ReturnNumbersAndFlags] == null)
                     {
-                        bitByte[last.ReturnNumbersAndFlags] = ArithmeticDecoder.CreateSymbolModel(256);
-                        ArithmeticDecoder.InitSymbolModel(bitByte[last.ReturnNumbersAndFlags]);
+                        bitByte[lastItem.ReturnNumbersAndFlags] = ArithmeticDecoder.CreateSymbolModel(256);
+                        ArithmeticDecoder.InitSymbolModel(bitByte[lastItem.ReturnNumbersAndFlags]);
                     }
-                    last.ReturnNumbersAndFlags = (byte)dec.DecodeSymbol(bitByte[last.ReturnNumbersAndFlags]);
+                    lastItem.ReturnNumbersAndFlags = (byte)decoder.DecodeSymbol(bitByte[lastItem.ReturnNumbersAndFlags]);
                 }
 
                 // decompress the classification ... if it has changed
                 if ((changed_values & 8) != 0)
                 {
-                    if (classification[last.Classification] == null)
+                    if (classification[lastItem.Classification] == null)
                     {
-                        classification[last.Classification] = ArithmeticDecoder.CreateSymbolModel(256);
-                        ArithmeticDecoder.InitSymbolModel(classification[last.Classification]);
+                        classification[lastItem.Classification] = ArithmeticDecoder.CreateSymbolModel(256);
+                        ArithmeticDecoder.InitSymbolModel(classification[lastItem.Classification]);
                     }
-                    last.Classification = (byte)dec.DecodeSymbol(classification[last.Classification]);
+                    lastItem.Classification = (byte)decoder.DecodeSymbol(classification[lastItem.Classification]);
                 }
 
                 // decompress the scan_angle_rank ... if it has changed
                 if ((changed_values & 4) != 0)
                 {
-                    last.ScanAngleRank = (sbyte)(byte)icScanAngleRank.Decompress((byte)last.ScanAngleRank, k_bits < 3 ? 1u : 0u);
+                    lastItem.ScanAngleRank = (sbyte)(byte)icScanAngleRank.Decompress((byte)lastItem.ScanAngleRank, k_bits < 3 ? 1u : 0u);
                 }
 
                 // decompress the user_data ... if it has changed
                 if ((changed_values & 2) != 0)
                 {
-                    if (userData[last.UserData] == null)
+                    if (userData[lastItem.UserData] == null)
                     {
-                        userData[last.UserData] = ArithmeticDecoder.CreateSymbolModel(256);
-                        ArithmeticDecoder.InitSymbolModel(userData[last.UserData]);
+                        userData[lastItem.UserData] = ArithmeticDecoder.CreateSymbolModel(256);
+                        ArithmeticDecoder.InitSymbolModel(userData[lastItem.UserData]);
                     }
-                    last.UserData = (byte)dec.DecodeSymbol(userData[last.UserData]);
+                    lastItem.UserData = (byte)decoder.DecodeSymbol(userData[lastItem.UserData]);
                 }
 
                 // decompress the point_source_ID ... if it has changed
                 if ((changed_values & 1) != 0)
                 {
-                    last.PointSourceID = (UInt16)icPointSourceID.Decompress(last.PointSourceID);
+                    lastItem.PointSourceID = (UInt16)icPointSourceID.Decompress(lastItem.PointSourceID);
                 }
             }
 
             // record the difference
-            lastXdiff[lastIncr] = x_diff;
-            lastYdiff[lastIncr] = y_diff;
-            lastIncr++;
-            if (lastIncr > 2) lastIncr = 0;
+            this.lastXdiff[lastIncr] = xDiff;
+            this.lastYdiff[lastIncr] = yDiff;
+            this.lastIncr++;
+            if (this.lastIncr > 2) 
+                lastIncr = 0;
 
             // copy the last point
-            item.X = last.X;
-            item.Y = last.Y;
-            item.Z = last.Z;
-            item.Intensity = last.Intensity;
-            item.ReturnNumbersAndFlags = last.ReturnNumbersAndFlags;
-            item.ClassificationAndFlags = last.Classification;
-            item.ScanAngleRank = last.ScanAngleRank;
-            item.UserData = last.UserData;
-            item.PointSourceID = last.PointSourceID;
+            BinaryPrimitives.WriteInt32LittleEndian(item, this.lastItem.X);
+            BinaryPrimitives.WriteInt32LittleEndian(item[4..], this.lastItem.Y);
+            BinaryPrimitives.WriteInt32LittleEndian(item[8..], this.lastItem.Z);
+            BinaryPrimitives.WriteUInt16LittleEndian(item[12..], this.lastItem.Intensity);
+            item[14] = this.lastItem.ReturnNumbersAndFlags;
+            item[15] = this.lastItem.Classification;
+            item[16] = (byte)this.lastItem.ScanAngleRank;
+            item[17] = this.lastItem.UserData;
+            BinaryPrimitives.WriteUInt16LittleEndian(item[18..], this.lastItem.PointSourceID);
+
             return true;
         }
     }

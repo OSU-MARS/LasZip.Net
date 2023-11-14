@@ -1,8 +1,10 @@
 ﻿// laswritepoint.{hpp, cpp}
+using LasZip.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using static System.Net.WebRequestMethods;
 
 namespace LasZip
 {
@@ -14,6 +16,7 @@ namespace LasZip
         private LasWriteItem[]? writersRaw;
         private LasWriteItem[]? writersCompressed;
         private ArithmeticEncoder? encoder;
+        private bool layeredLas14compression;
 
         // used for chunking
         private bool initChunking;
@@ -26,61 +29,86 @@ namespace LasZip
 
         public LasWritePoint()
         {
-            outStream = null;
-            numWriters = 0;
-            writers = null;
-            writersRaw = null;
-            writersCompressed = null;
-            encoder = null;
+            this.outStream = null;
+            this.numWriters = 0;
+            this.writers = null;
+            this.writersRaw = null;
+            this.writersCompressed = null;
+            this.encoder = null;
+            this.layeredLas14compression = false;
 
             // used for chunking
-            initChunking = false;
-            chunkSize = UInt32.MaxValue;
-            chunkCount = 0;
-            chunkTableStartPosition = 0;
-            chunkStartPosition = 0;
+            this.initChunking = false;
+            this.chunkSize = UInt32.MaxValue;
+            this.chunkCount = 0;
+            this.chunkTableStartPosition = 0;
+            this.chunkStartPosition = 0;
         }
 
         // should only be called *once*
-        public bool Setup(LasZip lazZip)
+        public bool Setup(LasZip lasZip)
         {
-            UInt16 numItems = lazZip.NumItems;
-            LasItem[]? items = lazZip.Items;
-            Debug.Assert((numItems == 0) || ((items != null) && (numItems == items.Length)));
+            UInt16 numItems = lasZip.NumItems;
+            LasItem[]? items = lasZip.Items;
+            if ((numItems == 0) || (items == null) || (numItems != items.Length))
+            { 
+                throw new ArgumentOutOfRangeException(nameof(lasZip));
+            }
 
             // create entropy encoder (if requested)
-            encoder = null;
-            if (lazZip != null && lazZip.Compressor != 0)
+            this.encoder = null;
+            if (lasZip.Compressor != 0)
             {
-                encoder = lazZip.Coder switch
+                this.encoder = lasZip.Coder switch
                 {
                     LasZip.CoderArithmetic => new ArithmeticEncoder(),
                     _ => throw new NotSupportedException("Entropy decoder not supported."),
                 };
+
+                // maybe layered compression for LAS 1.4 
+                this.layeredLas14compression = lasZip.Compressor == LasZip.CompressorLayeredChunked;
             }
 
             // initizalize the writers
-            writers = null;
-            numWriters = numItems;
+            this.writers = null;
+            this.numWriters = numItems;
 
             // disable chunking
-            chunkSize = UInt32.MaxValue;
+            this.chunkSize = UInt32.MaxValue;
 
             // always create the raw writers
-            writersRaw = new LasWriteItem[numWriters];
+            this.writersRaw = new LasWriteItem[numWriters];
 
-            for (UInt32 i = 0; i < numWriters; i++)
+            for (int writerIndex = 0; writerIndex < numWriters; writerIndex++)
             {
-                switch (items[i].Type)
+                switch (items[writerIndex].Type)
                 {
-                    case LasItemType.Point10: writersRaw[i] = new LasWriteItemRawPoint10(); break;
-                    case LasItemType.Gpstime11: writersRaw[i] = new LasWriteItemRawGpstime11(); break;
-                    case LasItemType.Rgb12: writersRaw[i] = new LasWriteItemRawRgb12(); break;
-                    case LasItemType.Wavepacket13: writersRaw[i] = new LasWriteItemRawWavepacket13(); break;
-                    case LasItemType.Byte: writersRaw[i] = new LasWriteItemRawByte(items[i].Size); break;
-                    case LasItemType.Point14: writersRaw[i] = new LasWriteItemRawPoint14(); break;
-                    case LasItemType.RgbNir14: writersRaw[i] = new LasWriteItemRawRgbNir14(); break;
-                    default: return false;
+                    case LasItemType.Point10: 
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawPoint10LittleEndian(): new LasWriteItemRawPoint10BigEndian(); 
+                        break;
+                    case LasItemType.Gpstime11:
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawGpstime11LittleEndian() : new LasWriteItemRawGpstime11BigEndian(); 
+                        break;
+                    case LasItemType.Rgb12:
+                    case LasItemType.Rgb14:
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawRgb12LittleEndian() : new LasWriteItemRawRgb12BigEndian(); 
+                        break;
+                    case LasItemType.Byte:
+                    case LasItemType.Byte14:
+                        writersRaw[writerIndex] = new LasWriteItemRawByte(items[writerIndex].Size); 
+                        break;
+                    case LasItemType.Point14: 
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawPoint14LittleEndian() : new LasWriteItemRawPoint14BigEndian();
+                        break;
+                    case LasItemType.RgbNir14: 
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawRgbNir14LittleEndian() : new LasWriteItemRawRgbNir14BigEndian();
+                        break;
+                    case LasItemType.Wavepacket13:
+                    case LasItemType.Wavepacket14:
+                        writersRaw[writerIndex] = BitConverter.IsLittleEndian ? new LasWriteItemRawWavepacket13LittleEndian() : new LasWriteItemRawWavepacket13BigEndian(); 
+                        break;
+                    default:
+                        return false;
                 }
             }
 
@@ -94,36 +122,100 @@ namespace LasZip
                     switch (items[i].Type)
                     {
                         case LasItemType.Point10:
-                            if (items[i].Version == 1) throw new NotSupportedException("Version 1 POINT10 is no longer supported, use version 2.");
-                            else if (items[i].Version == 2) writersCompressed[i] = new LasWriteItemCompressedPoint10v2(encoder);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                throw new NotSupportedException("Version 1 POINT10 is no longer supported, use version 2.");
+                            else if (items[i].Version == 2) 
+                                writersCompressed[i] = new LasWriteItemCompressedPoint10v2(encoder);
+                            else 
+                            { 
+                                return false; 
+                            }
                             break;
                         case LasItemType.Gpstime11:
-                            if (items[i].Version == 1) throw new NotSupportedException("Version 1 GPSTIME11 is no longer supported, use version 2.");
-                            else if (items[i].Version == 2) writersCompressed[i] = new LasWriteItemCompressedGpstime11v2(encoder);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                throw new NotSupportedException("Version 1 GPSTIME11 is no longer supported, use version 2.");
+                            else if (items[i].Version == 2) 
+                                writersCompressed[i] = new LasWriteItemCompressedGpstime11v2(encoder);
+                            else 
+                            { 
+                                return false; 
+                            }
                             break;
                         case LasItemType.Rgb12:
-                            if (items[i].Version == 1) throw new NotSupportedException("Version 1 RGB12 is no longer supported, use version 2.");
-                            else if (items[i].Version == 2) writersCompressed[i] = new LasWriteItemCompressedRgb12v2(encoder);
-                            else return false;
-                            break;
-                        case LasItemType.Wavepacket13:
-                            if (items[i].Version == 1) writersCompressed[i] = new LasWriteItemCompressedWavepacket13v1(encoder);
-                            else return false;
+                            if (items[i].Version == 1)
+                                throw new NotSupportedException("Version 1 RGB12 is no longer supported, use version 2.");
+                            else if (items[i].Version == 2) 
+                                writersCompressed[i] = new LasWriteItemCompressedRgb12v2(encoder);
+                            else 
+                            { 
+                                return false; 
+                            }
                             break;
                         case LasItemType.Byte:
-                            if (items[i].Version == 1) throw new NotSupportedException("Version 1 BYTE is no longer supported, use version 2.");
-                            else if (items[i].Version == 2) writersCompressed[i] = new LasWriteItemCompressedByteV2(encoder, items[i].Size);
-                            else return false;
+                            if (items[i].Version == 1) 
+                                throw new NotSupportedException("Version 1 BYTE is no longer supported, use version 2.");
+                            else if (items[i].Version == 2)
+                                writersCompressed[i] = new LasWriteItemCompressedByteV2(encoder, items[i].Size);
+                            else
+                            { 
+                                return false; 
+                            }
+                            break;
+                        case LasItemType.Point14:
+                            if (items[i].Version == 3)
+                                writersCompressed[i] = new LasWriteItemCompressedPoint14v3(encoder);
+                            else if (items[i].Version == 4)
+                                writersCompressed[i] = new LasWriteItemCompressedPoint14v4(encoder);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Rgb14:
+                            if (items[i].Version == 3)
+                                writersCompressed[i] = new LasWriteItemCompressedRgb14v3(encoder);
+                            else if (items[i].Version == 4)
+                                writersCompressed[i] = new LasWriteItemCompressedRgb14v4(encoder);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.RgbNir14:
+                            if (items[i].Version == 3)
+                                writersCompressed[i] = new LasWriteItemCompressedRgbNir14v3(encoder);
+                            else if (items[i].Version == 4)
+                                writersCompressed[i] = new LasWriteItemCompressedRgbNir14v4(encoder);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Byte14:
+                            if (items[i].Version == 3)
+                                writersCompressed[i] = new LasWriteItemCompressedByte14v3(encoder, items[i].Size);
+                            else if (items[i].Version == 4)
+                                writersCompressed[i] = new LasWriteItemCompressedByte14v4(encoder, items[i].Size);
+                            else
+                                return false;
+                            break;
+                        case LasItemType.Wavepacket13:
+                            if (items[i].Version == 1) 
+                                writersCompressed[i] = new LasWriteItemCompressedWavepacket13v1(encoder);
+                            else 
+                            { 
+                                return false; 
+                            }
+                            break;
+                        case LasItemType.Wavepacket14:
+                            if (items[i].Version == 3)
+                                writersCompressed[i] = new LasWriteItemCompressedWavepacket14v3(encoder);
+                            else if (items[i].Version == 4)
+                                writersCompressed[i] = new LasWriteItemCompressedWavepacket14v4(encoder);
+                            else
+                                return false;
                             break;
                         default: return false;
                     }
                 }
 
-                if (lazZip.Compressor == LasZip.CompressorPointwiseChunked)
+                if (lasZip.Compressor != LasZip.CompressorPointwise)
                 {
-                    if (lazZip.ChunkSize != 0) { this.chunkSize = lazZip.ChunkSize; }
+                    if (lasZip.ChunkSize != 0) { this.chunkSize = lasZip.ChunkSize; }
                     this.chunkCount = 0;
                     this.initChunking = true;
                 }
@@ -144,7 +236,7 @@ namespace LasZip
                 if (outstream.CanSeek) chunkTableStartPosition = outstream.Position;
                 else chunkTableStartPosition = -1;
 
-                outstream.Write(BitConverter.GetBytes(chunkTableStartPosition), 0, 8);
+                outstream.WriteLittleEndian(chunkTableStartPosition);
 
                 chunkStartPosition = outstream.Position;
             }
@@ -160,33 +252,64 @@ namespace LasZip
             return true;
         }
 
-        public bool Write(LasPoint point)
+        public bool Write(ReadOnlySpan<byte> point)
         {
-            if (chunkCount == chunkSize)
+            if (this.chunkCount == this.chunkSize)
             {
-                encoder.Done();
-                AddChunkToTable();
-                Init(outStream);
-                chunkCount = 0;
+                if (this.encoder != null)
+                {
+                    if (this.layeredLas14compression)
+                    {
+                        // write how many points are in the chunk
+                        this.outStream.WriteLittleEndian(this.chunkCount);
+                        // write all layers 
+                        for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                        {
+                            ((LasWriteItemCompressed)writers[writerIndex]).ChunkSizes();
+                        }
+                        for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                        {
+                            ((LasWriteItemCompressed)writers[writerIndex]).ChunkBytes();
+                        }
+                    }
+                    else
+                    {
+                        this.encoder.Done();
+                    }
+                    this.AddChunkToTable();
+                    this.Init(this.outStream);
+                    chunkCount = 0;
+                }
+                else
+                {
+                    // happens *only* for uncompressed LAS with over U32_MAX points 
+                    Debug.Assert(this.chunkSize == UInt32.MaxValue);
+                }
             }
             chunkCount++;
 
-            if (writers != null)
+            if (this.writers != null)
             {
-                for (UInt32 i = 0; i < numWriters; i++)
+                for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
                 {
-                    writers[i].Write(point);
+                    if (this.writers[writerIndex].Write(point, 0) == false)
+                    {
+                        return false;
+                    }
                 }
             }
             else
             {
-                for (UInt32 i = 0; i < numWriters; i++)
+                for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
                 {
-                    writersRaw[i].Write(point);
-                    ((LasWriteItemCompressed)(writersCompressed[i])).Init(point);
+                    if (this.writersRaw[writerIndex].Write(point, 0) == false)
+                    {
+                        return false;
+                    }
+                    ((LasWriteItemCompressed)(this.writersCompressed[writerIndex])).Init(point, 0);
                 }
-                writers = writersCompressed;
-                encoder.Init(outStream);
+                this.writers = writersCompressed;
+                this.encoder.Init(this.outStream);
             }
 
             return true;
@@ -194,7 +317,7 @@ namespace LasZip
 
         public bool Chunk()
         {
-            if (chunkStartPosition == 0 || chunkSize != UInt32.MaxValue)
+            if ((this.chunkStartPosition == 0) || (this.chunkSize != UInt32.MaxValue))
             {
                 return false;
             }
@@ -203,11 +326,28 @@ namespace LasZip
                 throw new InvalidOperationException();
             }
 
-            encoder.Done();
-            AddChunkToTable();
-            Init(outStream);
-            chunkCount = 0;
+            if (this.layeredLas14compression)
+            {
+                // write how many points are in the chunk
+                this.outStream.WriteLittleEndian(this.chunkCount);
+                // write all layers 
+                for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                {
+                    ((LasWriteItemCompressed)writers[writerIndex]).ChunkSizes();
+                }
+                for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                {
+                    ((LasWriteItemCompressed)writers[writerIndex]).ChunkBytes();
+                }
+            }
+            else
+            {
+                encoder.Done();
+            }
 
+            this.AddChunkToTable();
+            this.Init(this.outStream);
+            chunkCount = 0;
             return true;
         }
 
@@ -215,23 +355,39 @@ namespace LasZip
         {
             if (writers == writersCompressed)
             {
-                if (this.encoder == null)
+                if (this.layeredLas14compression)
                 {
-                    throw new InvalidOperationException();
+                    // write how many points are in the chunk
+                    this.outStream.WriteLittleEndian(this.chunkCount);
+                    // write all layers 
+                    for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                    {
+                        ((LasWriteItemCompressed)writers[writerIndex]).ChunkSizes();
+                    }
+                    for (int writerIndex = 0; writerIndex < this.numWriters; writerIndex++)
+                    {
+                        ((LasWriteItemCompressed)writers[writerIndex]).ChunkBytes();
+                    }
                 }
-
-                this.encoder.Done();
+                else
+                {
+                    if (this.encoder == null)
+                    {
+                        throw new InvalidOperationException();
+                    }
+                    this.encoder.Done();
+                }
                 if (chunkStartPosition != 0)
                 {
-                    if (chunkCount != 0) AddChunkToTable();
-                    return WriteChunkTable();
+                    if (chunkCount != 0) { this.AddChunkToTable(); }
+                    return this.WriteChunkTable();
                 }
             }
             else if (writers == null)
             {
                 if (chunkStartPosition != 0)
                 {
-                    return WriteChunkTable();
+                    return this.WriteChunkTable();
                 }
             }
 
@@ -258,13 +414,13 @@ namespace LasZip
             if (chunkTableStartPosition != -1) // stream is seekable
             {
                 outStream.Seek(chunkTableStartPosition, SeekOrigin.Begin);
-                outStream.Write(BitConverter.GetBytes(position), 0, 8);
+                outStream.WriteLittleEndian(position);
                 outStream.Seek(position, SeekOrigin.Begin);
             }
 
             UInt32 version = 0;
-            outStream.Write(BitConverter.GetBytes(version), 0, 4);
-            outStream.Write(BitConverter.GetBytes(chunkBytes.Count), 0, 4);
+            outStream.WriteLittleEndian(version);
+            outStream.WriteLittleEndian(chunkBytes.Count);
 
             if (chunkBytes.Count > 0)
             {
@@ -284,7 +440,7 @@ namespace LasZip
 
             if (chunkTableStartPosition == -1) // stream is not-seekable
             {
-                outStream.Write(BitConverter.GetBytes(position), 0, 8);
+                outStream.WriteLittleEndian(position);
             }
 
             return true;
